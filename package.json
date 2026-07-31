@@ -1,0 +1,17 @@
+{
+  "name": "lsd-llm-screen-dashboard",
+  "version": "0.2.0",
+  "private": true,
+  "description": "LSD (LLM Screen Dashboard): gestor local de sesiones screen con CLIs de agente, orquestado por la API de Deepseek",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "express": "^4.21.2",
+    "node-pty": "^1.1.0",
+    "ws": "^8.21.1"
+  }
+}

@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LSD — LLM Screen Dashboard</title>
+  <link rel="icon" type="image/svg+xml" href="logo.svg" />
+  <link rel="stylesheet" href="/vendor/xterm/css/xterm.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <img src="logo.svg" alt="LSD logo" id="logo" />
+    <h1>LSD</h1>
+    <span class="subtitle" data-i18n="header.subtitle">LLM Screen Dashboard — sesiones screen + agentes, orquestadas por Deepseek</span>
+    <select id="lang-select" data-i18n-title="header.langTitle" title="Idioma">
+      <option value="es">Español</option>
+      <option value="en">English</option>
+      <option value="zh">中文</option>
+      <option value="eu">Euskara</option>
+      <option value="ca">Català</option>
+      <option value="gl">Galego</option>
+    </select>
+    <button id="goodnight-btn" type="button" data-i18n="header.goodnight" data-i18n-title="header.goodnightTitle" title="Guardar el estado de todas las sesiones para mañana">🌙 Hasta mañana</button>
+    <button id="config-btn" type="button" data-i18n-title="header.configTitle" title="Configuración">⚙</button>
+  </header>
+
+  <main>
+    <section class="panel" id="terminal-panel">
+      <div class="output-header">
+        <h3 id="output-title" data-i18n="terminal.title">Terminal</h3>
+        <div class="output-actions">
+          <button id="fullscreen-btn" type="button" data-i18n-title="terminal.fullscreenTitle" title="Terminal a pantalla completa">⛶</button>
+          <details class="info-help">
+            <summary data-i18n-title="terminal.fullscreenSummaryTitle" title="¿Para qué es la pantalla completa?">ⓘ</summary>
+            <p class="help" id="fullscreen-help" data-i18n-html="terminal.fullscreenHelp">
+              <strong>⛶ Pantalla completa = atajos de teclado sin problemas.</strong><br />
+              En una pestaña normal, el navegador se queda con <strong>Ctrl+T</strong>
+              (pestaña nueva), <strong>Ctrl+W</strong> (cerrar), Ctrl+N, F11… y la sesión
+              nunca los recibe. Al poner el terminal en pantalla completa se activa el
+              <em>bloqueo de teclado</em>: esas teclas llegan a la sesión como en un
+              terminal de verdad. Para salir: botón <strong>✕ Salir</strong> (arriba a la
+              derecha) o mantén <strong>Esc</strong> un momento.
+            </p>
+          </details>
+          <button id="history-btn" type="button" data-i18n="terminal.history" data-i18n-title="terminal.historyTitle" title="Ver historial completo">📜 Historial</button>
+        </div>
+      </div>
+      <div id="term-keys">
+        <span data-i18n="terminal.sendToSession">Enviar a la sesión:</span>
+        <button type="button" data-ctrl="s" data-i18n-title="terminal.ctrlSTitle" title="Envía ^S a la sesión (el navegador reserva Ctrl+S para Guardar página)">Ctrl+S</button>
+        <button type="button" data-ctrl="t" data-i18n-title="terminal.ctrlTTitle" title="Envía ^T a la sesión (el navegador reserva Ctrl+T para pestaña nueva)">Ctrl+T</button>
+      </div>
+      <div class="terminal-wrap">
+        <div id="terminal"></div>
+        <button id="fullscreen-exit" type="button" data-i18n="terminal.exitFullscreen" data-i18n-title="terminal.exitFullscreenTitle" title="Salir de pantalla completa">✕ Salir</button>
+        <div id="history-overlay" class="hidden">
+          <div class="history-header">
+            <div class="history-tabs">
+              <button id="hist-tab-term" type="button" class="active" data-i18n="history.tabTerm">🖥 Terminal</button>
+              <button id="hist-tab-conv" type="button" data-i18n="history.tabConv">💬 Conversación</button>
+            </div>
+            <span class="history-title"><span data-i18n="history.title">Historial — </span><span id="history-name"></span></span>
+            <button id="history-reload" type="button" data-i18n-title="history.reloadTitle" title="Recargar">↻</button>
+            <button id="history-close" type="button" data-i18n="history.back">Volver</button>
+          </div>
+          <div id="history-content"></div>
+        </div>
+      </div>
+    </section>
+
+    <div class="col">
+      <section class="panel" id="sessions-panel">
+        <div class="panel-title">
+          <h2 data-i18n="sessions.title">Sesiones</h2>
+          <details class="info-help left">
+            <summary data-i18n-title="common.helpTitle" title="Ayuda">ⓘ</summary>
+            <p class="help" data-i18n-html="sessions.help">
+              El <strong>gestor</strong> puede crear y operar las sesiones desde el chat.
+              Tú puedes <strong>tomar el control</strong> seleccionando una sesión y
+              escribiendo directamente en su terminal. Rueda ↑ sobre el terminal (o el
+              botón 📜) abre el historial (conversación en markdown o vista Terminal);
+              para volver: <strong>Volver</strong>, <strong>Esc</strong>, clic en el
+              historial o simplemente empieza a escribir. El botón <strong>⛶</strong> pone
+              el terminal a pantalla completa y captura las teclas reservadas del
+              navegador (Ctrl+T, Ctrl+W…).<br />
+              <strong>Workdir</strong>: sin carpeta, cada sesión recibe la suya propia y
+              vacía (<code>workspaces/&lt;nombre&gt;</code>) y trabaja solo ahí. Si eliges
+              una carpeta vacía, empieza de cero en ella; si tiene ficheros, se ofrece
+              que el gestor la analice para dar contexto.
+            </p>
+          </details>
+        </div>
+        <form id="create-form">
+          <input id="create-name" data-i18n-ph="create.namePh" placeholder="nombre (puede tener espacios)" required autocomplete="off" />
+          <select id="create-cli" data-i18n-title="create.cliTitle" title="Agente de la sesión (CLI instalado o modelo local de Ollama)"></select>
+          <input id="create-workdir" data-i18n-ph="create.workdirPh" placeholder="workdir (opcional, escribe / para explorar)" list="workdir-list" autocomplete="off" />
+          <datalist id="workdir-list"></datalist>
+          <button id="dir-picker-btn" type="button" data-i18n-title="create.dirPickerTitle" title="Elegir directorio">📁</button>
+          <button type="submit" data-i18n="create.submit">Crear</button>
+        </form>
+        <div class="list-section">
+          <div class="list-header" id="active-header"><span class="arrow">▾</span> <span data-i18n="sessions.active">Sesiones activas (</span><span id="active-count">0</span>)</div>
+          <ul id="session-list"></ul>
+        </div>
+        <div class="list-section">
+          <div class="list-header" id="archived-header"><span class="arrow">▾</span> <span data-i18n="sessions.archived">Archivadas (</span><span id="archived-count">0</span>)</div>
+          <ul id="archived-list"></ul>
+        </div>
+      </section>
+
+      <section class="panel" id="chat-panel">
+        <h2 data-i18n="chat.title">Gestor (Deepseek)</h2>
+        <div id="chat-log"></div>
+        <form id="chat-form">
+          <input id="chat-input" data-i18n-ph="chat.placeholder" placeholder="Pide al gestor: crea una sesión, revisa cómo va, dale instrucciones…" autocomplete="off" />
+          <button type="submit" data-i18n="chat.send">Enviar</button>
+        </form>
+      </section>
+    </div>
+  </main>
+
+  <div id="dir-modal" class="hidden">
+    <div class="dir-dialog">
+      <div class="dir-header">
+        <span id="dir-path"></span>
+        <button id="dir-cancel" type="button">✕</button>
+      </div>
+      <ul id="dir-list"></ul>
+      <div class="dir-actions">
+        <button id="dir-up" type="button" data-i18n="dir.up">⬆ Subir</button>
+        <button id="dir-select" type="button" data-i18n="dir.select">Elegir este directorio</button>
+      </div>
+    </div>
+  </div>
+  <div id="analyze-modal" class="hidden">
+    <div class="dir-dialog analyze-dialog">
+      <h3 data-i18n="analyze.title">📂 Directorio con contenido</h3>
+      <p id="analyze-text"></p>
+      <p class="help" data-i18n="analyze.help">
+        El gestor esperará a que la sesión arranque y le pedirá analizar el
+        proyecto (estructura, README, puntos de entrada, tecnologías) para
+        generar un resumen de contexto.
+      </p>
+      <div class="dir-actions">
+        <button id="analyze-no" type="button" class="btn-secondary" data-i18n="analyze.no">Ahora no</button>
+        <button id="analyze-yes" type="button" data-i18n="analyze.yes">Analizar proyecto</button>
+      </div>
+    </div>
+  </div>
+  <div id="confirm-modal" class="hidden">
+    <div class="dir-dialog analyze-dialog">
+      <h3 id="confirm-title" data-i18n="confirm.title">Confirmar</h3>
+      <p id="confirm-text"></p>
+      <div class="dir-actions">
+        <button id="confirm-no" type="button" class="btn-secondary" data-i18n="confirm.no">Cancelar</button>
+        <button id="confirm-yes" type="button" data-i18n="confirm.yes">Aceptar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="config-modal" class="hidden">
+    <div class="dir-dialog config-dialog">
+      <div class="dir-header">
+        <span data-i18n="config.title">⚙ Configuración</span>
+        <button id="config-close" type="button">✕</button>
+      </div>
+      <form id="config-form">
+        <fieldset>
+          <legend data-i18n="config.legendManager">Gestor — el LLM que te obedece y orquesta las sesiones</legend>
+          <div class="config-grid">
+            <label><span data-i18n="config.model">Modelo</span>
+              <input id="cfg-manager-model" list="model-list" autocomplete="off" />
+            </label>
+            <label><span data-i18n="config.reportEvery">Informe de sesiones cada N min</span> <span class="muted" data-i18n="config.reportZeroOff">(0 = desactivado)</span>
+              <input id="cfg-report-interval" type="number" min="0" max="1440" step="1" />
+            </label>
+          </div>
+          <details class="advanced">
+            <summary data-i18n="config.advancedSummary">⚙ Avanzado: Base URL y API key (ya tienen valores por defecto)</summary>
+            <div class="config-grid">
+              <label><span data-i18n="config.baseUrlApi">Base URL de la API</span>
+                <input id="cfg-manager-url" />
+              </label>
+              <label class="cfg-key"><span data-i18n="config.apiKeyLabel">API key (compartida con las sesiones kimi)</span> <span id="cfg-key-hint" class="muted"></span>
+                <input id="cfg-api-key" type="password" data-i18n-ph="config.apiKeyPh" placeholder="sin cambios" autocomplete="new-password" />
+              </label>
+            </div>
+          </details>
+        </fieldset>
+        <fieldset>
+          <legend data-i18n="config.legendSessions">Sesiones — el agente que trabaja en cada carpeta</legend>
+          <div class="config-grid">
+            <label><span data-i18n="config.agentCli">Agente (CLI instalado)</span>
+              <span class="cli-row">
+                <select id="cfg-session-cli"></select>
+                <button id="discover-agents" type="button" data-i18n="config.discover" data-i18n-title="config.discoverTitle" title="Detectar CLIs instalados">🔍 Detectar</button>
+              </span>
+            </label>
+          </div>
+          <details class="advanced">
+            <summary data-i18n="config.overrideSummary">⚙ Usar otro modelo en las sesiones (override, p. ej. Ollama)</summary>
+            <div class="config-grid">
+              <label><span data-i18n="config.model">Modelo</span> <span class="muted" data-i18n="config.modelOptional">(opcional; vacío = config propia de kimi)</span>
+                <input id="cfg-session-model" list="model-list-sessions" autocomplete="off" />
+              </label>
+              <label><span data-i18n="config.baseUrlApi">Base URL de la API</span> <span class="muted" data-i18n="config.baseUrlIgnored">(se ignora si Modelo está vacío)</span>
+                <input id="cfg-session-url" />
+              </label>
+            </div>
+          </details>
+          <div id="cfg-session-warning" class="warning hidden"></div>
+        </fieldset>
+        <datalist id="model-list"></datalist>
+        <!-- Planos separados: el gestor ve los modelos de SU API (model-list);
+             el override de sesiones solo modelos locales de Ollama -->
+        <datalist id="model-list-sessions"></datalist>
+        <div class="config-actions">
+          <button type="submit" data-i18n="config.save">Guardar</button>
+          <span id="cfg-status" class="muted"></span>
+          <details class="info-help">
+            <summary data-i18n-title="config.helpTitle" title="Ayuda de configuración">ⓘ</summary>
+            <p class="help" data-i18n-html="config.help">
+              Los cambios del <strong>gestor</strong> aplican al instante; los de
+              <strong>sesiones</strong> aplican a las sesiones <strong>nuevas</strong>
+              (las existentes conservan la suya). La API key nunca se muestra completa;
+              déjala vacía para no cambiarla. Modelo de sesiones <strong>vacío = cada
+              kimi usa su propia configuración</strong> (recomendado si ya autorizaste
+              kimi); si pones uno, se inyecta como override con esa Base URL y la API
+              key de arriba. Claude, codex, etc. siempre usan su propia configuración.
+              Los modelos se sugieren de la API configurada y de <strong>Ollama</strong>
+              local (si corre: <code>ollama serve</code>).
+            </p>
+          </details>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="/vendor/xterm/lib/xterm.js"></script>
+  <script src="/vendor/addon-fit/lib/addon-fit.js"></script>
+  <script src="i18n.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
