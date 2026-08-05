@@ -78,6 +78,10 @@ la línea de comandos del propio shell y se automata). Buscar el PID por puerto:
 - `src/conversation.js` — lee la conversación real de una sesión desde su `wire.jsonl`
   (usuarios: `context.append_message`; assistant: loop events `content.part` tipo
   `text`; formato interno de kimi, si cambia el frontend cae a la pestaña Terminal)
+- `src/matrix.js` — bot de Matrix opcional (02/08/26): otro canal de entrada al
+  MISMO gestor (runManagerChat) para hablar desde el móvil. matrix-bot-sdk,
+  historial por sala en memoria (20 msgs), cola por sala, typing indicator,
+  autojoin selectivo solo de MXIDs en MATRIX_ALLOWED_USERS
 - `workspaces/<nombre>` — workdir por defecto de cada sesión creada
 
 ## Decisiones técnicas clave (no "desarreglar")
@@ -283,9 +287,34 @@ la línea de comandos del propio shell y se automata). Buscar el PID por puerto:
   El desplegable está junto a "Modelo de las sesiones" en Configuración, y el
   formulario de crear tiene otro sincronizado (`POST /api/sessions` acepta `cli`,
   validado, con caída al configurado si no vale).
+- **Bot de Matrix (02/08/26, opción A: sala SIN cifrar)**: el gestor es accesible
+  desde el móvil vía el Synapse propio (`whasap.duckdns.org`, en farnsworth;
+  federación off, registro cerrado, todas sus salas cifradas con megolm — por
+  eso el bot usa UNA sala dedicada creada sin cifrar; NO implementa E2EE y en
+  salas cifradas no lee nada). Cuenta `@lsd-bot:whasap.duckdns.org` (NO admin;
+  creada con `register_new_matrix_user`, token por /login en el `.env`).
+  Config SOLO en `.env` (como HOST, no editable desde la web):
+  `MATRIX_HOMESERVER` / `MATRIX_USER` / `MATRIX_ACCESS_TOKEN` /
+  `MATRIX_ALLOWED_USERS` (lista blanca de MXIDs, hoy andres y papa — el bot
+  ignora en silencio a cualquier otro; probado en vivo). Sin esas claves el bot
+  no arranca y no rompe nada. `startMatrixBot()` nunca lanza (un fallo de
+  Matrix no impide el arranque del dashboard). El informe periódico también se
+  envía a las salas del bot (`sendMatrixReport`). Ojo: en matrix-bot-sdk el
+  typing es `client.setTyping()` (no `sendTyping`). Ojo también: el proxy de
+  duckdns NO expone `/_synapse/admin` y en ese Synapse la desactivación de
+  usuarios es el endpoint v1 `/_synapse/admin/v1/deactivate/<mxid>` (el v2
+  `users/<mxid>/deactivate` devuelve M_UNRECOGNIZED).
 
 ## Estado al guardar este archivo
 
+- **Bot de Matrix en producción (02/08/26)**: `@lsd-bot:whasap.duckdns.org`
+  activo contra el Synapse de farnsworth; verificado E2E (autojoin selectivo,
+  respuesta del gestor con tools, informe periódico a Matrix, usuario no
+  autorizado ignorado). Sala de prueba `!NoOZgediZfUDMUwhey:whasap.duckdns.org`
+  ("Gestor LSD (prueba)") ya creada sin cifrar con el bot dentro — el usuario
+  puede usarla o crear la suya e invitar a `@lsd-bot` (andres/papa son admin y
+  pueden invitar pese a `block_non_admin_invites`). Usuarios temporales de la
+  prueba (lsd-test*, lsd-tmpadm*) desactivados con erase.
 - **Renombrado a LSD (LLM Screen Dashboard)**: logo `public/logo.svg`, header,
   título, package.json (`lsd-llm-screen-dashboard`), log de arranque. La CARPETA
   del proyecto sigue siendo `llm-screen-dashboard` a propósito (kimi indexa por
@@ -295,8 +324,8 @@ la línea de comandos del propio shell y se automata). Buscar el PID por puerto:
   con `deleteWorkdir=1` (carpeta borrada, registro limpio). Guardar historial (⬇)
   descarga `<slug>-historial.md` con conversación (wire.jsonl) + snapshot del registry.
 - **send_input con pausa**: verificado que el comando se ejecuta (ENTER_OK_42).
-- **Historial**: pestaña recordada en localStorage (`hist-mode`); secciones
-  Activas/Archivadas plegables (`ls-active`/`ls-archived`).
+- **Historial**: pestaña recordada en localStorage (`hist-mode`); sección
+  Activas plegable (`ls-active`).
 - **Sesiones vivas**: seguridad-en-in2ai, audioyou, Prueba, prueba_2 (adoptadas).
 - **Estado 22/07/26 (cierre del día)** — jornada larga de trabajo, todo verificado:
   - *Ciclo de vida*: registry con fsync; recovery nunca levanta `archived` (cierra
@@ -335,12 +364,19 @@ la línea de comandos del propio shell y se automata). Buscar el PID por puerto:
   (mtime del wire.jsonl); ventana de gracia 5 s tras attach/detach del dashboard.
 - **Layout (23/07/26)**: panel izquierdo = SOLO el terminal activo (`#terminal-panel`,
   con la barra `#term-keys` y el header de acciones); columna derecha = panel
-  Sesiones (`#sessions-panel`: form de crear + listas activas/archivadas) arriba y
+  Sesiones (`#sessions-panel`: form de crear + lista de activas) arriba y
   chat del gestor abajo; grid 3fr/2fr a favor del terminal. La **configuración vive
   en un modal** (`#config-modal`, mismo patrón que dir/analyze/confirm) que se abre
   con el botón ⚙ de la cabecera (`#config-btn`; cierra con ✕ o clic fuera) — ya no
   hay panel de configuración permanente. Los ids del form de config no cambiaron,
   solo se movió el bloque al modal.
+  **Archivadas en modal (05/08/26)**: la lista de archivadas ya NO está en el panel;
+  la abre el botón 🗄 de la cabecera (`#archived-btn`, con contador) en
+  `#archived-modal` (mismo patrón de modal): buscador por nombre/id en vivo
+  (`#archived-search`, filtra sobre `lastArchived` sin refetch) y las mismas
+  acciones de antes (reabrir/⬇/🗑). `renderArchived` guarda `lastArchived` y
+  actualiza el texto del botón con el contador (por eso el botón NO lleva
+  `data-i18n`: su texto lo pone JS con `header.archivedCount`).
 - **i18n (24/07/26)**: UI multi-idioma con selector en la cabecera (`#lang-select`,
   es/en/zh/eu/ca/gl; default es; localStorage `lsd-lang`). `public/i18n.js` (se carga
   antes de app.js): diccionarios `I18N` (124 claves simétricas por idioma, es como
@@ -397,7 +433,7 @@ la línea de comandos del propio shell y se automata). Buscar el PID por puerto:
   home Ollama (hecho con prueba4 el 22/07). El usuario NO mantiene Ollama
   levantado por defecto; override global vacío (para usar: `ollama serve` y
   elegir el modelo en el desplegable de crear — aparece solo si corre).
-- Dependencias: express, ws, node-pty (nativa), @xterm/xterm, @xterm/addon-fit
+- Dependencias: express, ws, node-pty (nativa), matrix-bot-sdk, @xterm/xterm, @xterm/addon-fit
   (assets en `/vendor/*`, sin CDN). Sin tests automatizados (verificación manual
   node/curl). Sin git.
 - **Instaladores (25/07/26)**: `install.sh` (Linux/macOS/WSL2) e `install.ps1`

@@ -22,6 +22,7 @@
       <option value="gl">Galego</option>
     </select>
     <button id="goodnight-btn" type="button" data-i18n="header.goodnight" data-i18n-title="header.goodnightTitle" title="Guardar el estado de todas las sesiones para mañana">🌙 Hasta mañana</button>
+    <button id="archived-btn" type="button" data-i18n-title="header.archivedTitle" title="Ver sesiones archivadas">🗄 Archivadas</button>
     <button id="config-btn" type="button" data-i18n-title="header.configTitle" title="Configuración">⚙</button>
   </header>
 
@@ -103,10 +104,6 @@
           <div class="list-header" id="active-header"><span class="arrow">▾</span> <span data-i18n="sessions.active">Sesiones activas (</span><span id="active-count">0</span>)</div>
           <ul id="session-list"></ul>
         </div>
-        <div class="list-section">
-          <div class="list-header" id="archived-header"><span class="arrow">▾</span> <span data-i18n="sessions.archived">Archivadas (</span><span id="archived-count">0</span>)</div>
-          <ul id="archived-list"></ul>
-        </div>
       </section>
 
       <section class="panel" id="chat-panel">
@@ -156,6 +153,17 @@
         <button id="confirm-no" type="button" class="btn-secondary" data-i18n="confirm.no">Cancelar</button>
         <button id="confirm-yes" type="button" data-i18n="confirm.yes">Aceptar</button>
       </div>
+    </div>
+  </div>
+
+  <div id="archived-modal" class="hidden">
+    <div class="dir-dialog archived-dialog">
+      <div class="dir-header">
+        <span data-i18n="archived.title">🗄 Sesiones archivadas</span>
+        <button id="archived-close" type="button">✕</button>
+      </div>
+      <input id="archived-search" type="text" data-i18n-ph="archived.searchPh" placeholder="buscar por nombre…" autocomplete="off" />
+      <ul id="archived-list"></ul>
     </div>
   </div>
 

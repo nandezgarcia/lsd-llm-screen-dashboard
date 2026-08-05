@@ -34,6 +34,15 @@ export const config = {
   sessionCli: process.env.SESSION_CLI || 'kimi',
   // Informe periódico del gestor sobre las sesiones activas (minutos; 0 = off)
   reportIntervalMin: Number(process.env.REPORT_INTERVAL_MIN || 0),
+  // Bot de Matrix (opcional; sin estas claves no arranca). No editable desde
+  // la web (como HOST): se define en .env y se aplica al arrancar.
+  matrixHomeserver: process.env.MATRIX_HOMESERVER || '',
+  matrixUser: process.env.MATRIX_USER || '',
+  matrixAccessToken: process.env.MATRIX_ACCESS_TOKEN || '',
+  matrixAllowedUsers: (process.env.MATRIX_ALLOWED_USERS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
   workspacesDir: path.join(ROOT, 'workspaces'),
 };
 
@@ -191,6 +200,8 @@ export function publicConfig() {
     kimiSessionBaseUrl: process.env.KIMI_SESSION_BASE_URL || '',
     sessionCli: config.sessionCli,
     reportIntervalMin: config.reportIntervalMin,
+    // Solo el flag, nunca el token
+    matrixEnabled: Boolean(config.matrixHomeserver && config.matrixAccessToken),
     apiKeySet: Boolean(key),
     apiKeyHint: key ? `••••${key.slice(-4)}` : '',
   };

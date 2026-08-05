@@ -120,9 +120,42 @@ HOST=127.0.0.1                     # 0.0.0.0 = interfaze guztiak (erabili proxy 
 - **Web terminal erreal** bat `node-pty` + `xterm.js` erabiliz, teklak konposatuak (azentuak) onartzen dituena, Chromium-en pantaila osoko teklatu-blokeoa eta `Ctrl+S` edo `Ctrl+T` bezalako teklatu erreserbatuentzako botoiak barne.
 - **Jardueraren monitorea** saioak `Working` / `Waiting` gisa sailkatzen ditu 3 segundoro hardcopy-ak alderatuz.
 - **Historialaren artxibatzaileak** kimi-ren `wire.jsonl`-tik mezu berriak kopiatzen ditu `data/history/<slug>.jsonl`-ra.
-- **Kudeatzailearen txosten periodikoa** konfiguragarria `REPORT_INTERVAL_MIN` bidez, saio aktiboen laburpena ematen duena.
+- **Kudeatzailearen txosten periodikoa** konfiguragarria `REPORT_INTERVAL_MIN` bidez, saio aktiboen laburpena ematen duena (Matrixera ere bidaltzen da bot-a aktibatuta badago — ikusi beherago).
+- **Matrix bot-a (aukerakoa)**: hitz egin kudeatzaile berarekin mugikorretik — ikusi [Matrix bot-a](#matrix-bot-a-aukerakoa) atala.
 - **Ollama lokalaren sostengua** aukerako modelo-override gisa kimi saioentzat.
 - **Zuriuneak dituzten etiketak**: UI-an gizakiarentzako izenak, screen eta URL-entzako slug barnekoak.
+
+---
+
+## Matrix bot-a (aukerakoa)
+
+Deepseek kudeatzaile berarekin hitz egin dezakezu mugikorretik [Matrix](https://matrix.org) bidez (Element eta beste bezero batzuekin). Bot-a `src/matrix.js`-n dago, baimendutako erabiltzaileei soilik erantzuten die eta **zifratu gabeko** gela bat behar du (ez du E2EE onartzen).
+
+Errezetak doako homeserver publiko **matrix.org** erabiltzen du adibide gisa — baina edozein Matrix homeserver balio du, **zeurea** barne (adib. autoostatutako Synapse bat): `MATRIX_HOMESERVER` harantz apuntatu besterik ez. Zeure zerbitzarian erregistroa itxita egoten da normalean, beraz bot-aren kontua zerbitzarian bertan sortzen da (Synapse-en: `register_new_matrix_user -c /etc/matrix-synapse/homeserver.yaml`).
+
+1. **Sortu bot-arentzako kontu bat** matrix.org-en (Elementen: itxi saioa eta erregistratu kontu berri bat, adib. `@my-lsd-bot:matrix.org`).
+2. **Lortu access token-a**:
+   ```bash
+   curl -X POST https://matrix.org/_matrix/client/v3/login \
+     -H 'Content-Type: application/json' \
+     -d '{"type":"m.login.password","identifier":{"type":"m.id.user","user":"my-lsd-bot"},"password":"<bot-aren pasahitza>"}'
+   ```
+   (Elementen ere badago: *Ezarpenak → Laguntza eta honi buruz → Access Token*.)
+3. **Konfiguratu `.env`** eta berrabiarazi LSD:
+   ```
+   MATRIX_HOMESERVER=https://matrix.org
+   MATRIX_USER=@my-lsd-bot:matrix.org
+   MATRIX_ACCESS_TOKEN=<2. urratseko tokena>
+   MATRIX_ALLOWED_USERS=@your-user:matrix.org
+   ```
+   Aldagai horiek gabe, bot-a ez da abiarazten. Abiarazte-logak `Matrix: bot conectado como …` erakusten du konektatzean.
+4. **Sortu zifratu gabeko gela bat** Elementen (*ezarpen aurreratuak → desaktibatu zifratua* sortzean) eta gonbidatu bot-a bere MXID osoa idatziz (`@my-lsd-bot:matrix.org`) — kontu berriak ez dira erabiltzaile-bilatzailean agertzen. Bot-ak baimendutako erabiltzaileen gonbidapenak bakarrik onartzen ditu automatikoki.
+
+Oharrak:
+
+- `MATRIX_ALLOWED_USERS` MXIDen zerrenda zuria da, komaz bereizita. Bot-ak **gainerako guztiari isilka ez dio kasurik egiten** — mantendu labur: kudeatzaileak saioak sortu eta itxi ditzake.
+- Matrix-eko DMak defektuz zifratuta doaz eta bot-ak ezin ditu zifratutako gelak irakurri; erabili zifratu gabeko gela dedikatu bat. matrix.org-en horrek esan nahi du homeserver-aren operadoreak edukia ikus dezakeela — zeure zerbitzariarekin zure eskuetan geratzen da (garraioa TLSz zifratuta doa bi kasuetan).
+- Kudeatzailearen txosten periodikoa (`REPORT_INTERVAL_MIN`) bot-aren geletara ere bidaltzen da.
 
 ---
 

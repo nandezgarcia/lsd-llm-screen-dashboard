@@ -120,9 +120,42 @@ HOST=127.0.0.1                     # 0.0.0.0 = totes les interfícies (només am
 - **Terminal web real** amb `node-pty` + `xterm.js`, incloent suport per a tecles compostes (accents), bloqueig de teclat a pantalla completa a Chromium i botons per a tecles reservades com `Ctrl+S` o `Ctrl+T`.
 - **Monitor d'activitat** classifica les sessions com `Working` / `Waiting` comparant hardcopies cada 3 segons.
 - **Arxivador d'historial** copia els missatges nous del `wire.jsonl` de kimi a `data/history/<slug>.jsonl`.
-- **Informe periòdic del gestor** configurable via `REPORT_INTERVAL_MIN` que resumeix les sessions actives.
+- **Informe periòdic del gestor** configurable via `REPORT_INTERVAL_MIN` que resumeix les sessions actives (també s'envia a Matrix si el bot està actiu — vegeu més avall).
+- **Bot de Matrix (opcional)**: parla amb el mateix gestor des del mòbil — vegeu la secció [Bot de Matrix](#bot-de-matrix-opcional).
 - **Suport local d'Ollama** com a override opcional de model per a sessions de kimi.
 - **Etiquetes amb espais**: noms amigables per a humans a la interfície, slugs interns per a screen i URLs.
+
+---
+
+## Bot de Matrix (opcional)
+
+Pots parlar amb el mateix gestor de Deepseek des del mòbil a través de [Matrix](https://matrix.org) (Element i altres clients). El bot viu a `src/matrix.js`, només respon a usuaris autoritzats i necessita una sala **sense xifrar** (no suporta E2EE).
+
+La recepta fa servir **matrix.org**, el servidor públic i gratuït — però qualsevol homeserver Matrix serveix, incloent-hi **un de propi** (p. ex. un Synapse autoallotjat): només cal apuntar `MATRIX_HOMESERVER` cap a ell. Amb un servidor propi el registre sol estar tancat, així que el compte del bot es crea al mateix servidor (a Synapse: `register_new_matrix_user -c /etc/matrix-synapse/homeserver.yaml`).
+
+1. **Crea un compte per al bot** a matrix.org (a Element: tanca la sessió i registra un compte nou, p. ex. `@my-lsd-bot:matrix.org`).
+2. **Obtén el seu access token**:
+   ```bash
+   curl -X POST https://matrix.org/_matrix/client/v3/login \
+     -H 'Content-Type: application/json' \
+     -d '{"type":"m.login.password","identifier":{"type":"m.id.user","user":"my-lsd-bot"},"password":"<contrasenya-del-bot>"}'
+   ```
+   (A Element també hi és a *Configuració → Ajuda i quant a → Token d'accés*.)
+3. **Configura el `.env`** i reinicia LSD:
+   ```
+   MATRIX_HOMESERVER=https://matrix.org
+   MATRIX_USER=@my-lsd-bot:matrix.org
+   MATRIX_ACCESS_TOKEN=<token del pas 2>
+   MATRIX_ALLOWED_USERS=@your-user:matrix.org
+   ```
+   Sense aquestes variables el bot simplement no s'engega. El log d'engegada mostra `Matrix: bot conectado como …` en connectar.
+4. **Crea una sala sense xifrar** a Element (*configuració avançada → desactivar el xifratge* en crear-la) i convida el bot escrivint el seu MXID complet (`@my-lsd-bot:matrix.org`) — els comptes nous no apareixen al cercador d'usuaris. El bot accepta automàticament invitacions només d'usuaris autoritzats.
+
+Notes:
+
+- `MATRIX_ALLOWED_USERS` és una llista blanca de MXIDs separats per comes. El bot **ignora en silenci qualsevol altre usuari** — mantén-la curta: el gestor pot crear i tancar sessions.
+- Els DMs de Matrix es xifren per defecte i el bot no pot llegir sales xifrades; fes servir una sala dedicada sense xifrar. A matrix.org això vol dir que l'operador del servidor podria veure el contingut — amb un servidor propi es queda a les teves mans (el transport va xifrat amb TLS en ambdós casos).
+- L'informe periòdic del gestor (`REPORT_INTERVAL_MIN`) també s'envia a les sales del bot.
 
 ---
 

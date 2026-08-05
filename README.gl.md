@@ -120,9 +120,42 @@ HOST=127.0.0.1                    # 0.0.0.0 = todas as interfaces (usar só con 
 - **Terminal web real** con `node-pty` + `xterm.js`, incluíndo soporte para teclas compostas (acentos), bloqueo de teclado a pantalla completa en Chromium e botóns para teclas reservadas como `Ctrl+S` ou `Ctrl+T`.
 - **Monitor de actividade** que clasifica as sesións como `Traballando` / `Agardando` comparando hardcopies cada 3 segundos.
 - **Arquivador de historial** que copia mensaxes novas do `wire.jsonl` de kimi a `data/history/<slug>.jsonl`.
-- **Informe periódico do xestor** configurable a través de `REPORT_INTERVAL_MIN` que resume as sesións activas.
+- **Informe periódico do xestor** configurable a través de `REPORT_INTERVAL_MIN` que resume as sesións activas (tamén se envía a Matrix se o bot está activo — ver abaixo).
+- **Bot de Matrix (opcional)**: fala co mesmo xestor desde o móbil — ver a sección [Bot de Matrix](#bot-de-matrix-opcional).
 - **Soporte local de Ollama** como un override opcional de modelo para sesións de kimi.
 - **Etiquetas con espazos**: nomes amigables para humanos na interface, slugs internos para screen e URLs.
+
+---
+
+## Bot de Matrix (opcional)
+
+Podes falar co mesmo xestor de Deepseek desde o móbil a través de [Matrix](https://matrix.org) (Element e outros clientes). O bot vive en `src/matrix.js`, só responde a usuarios autorizados e necesita unha sala **sen cifrar** (non soporta E2EE).
+
+A receita usa **matrix.org**, o servidor público e gratuíto — pero vale calquera homeserver Matrix, incluído **un propio** (p. ex. un Synapse autoaloxado): basta apuntar `MATRIX_HOMESERVER` a el. Cun servidor propio o rexistro adoita estar pechado, así que a conta do bot créase no propio servidor (en Synapse: `register_new_matrix_user -c /etc/matrix-synapse/homeserver.yaml`).
+
+1. **Crea unha conta para o bot** en matrix.org (desde Element: pecha sesión e rexistra unha conta nova, p. ex. `@my-lsd-bot:matrix.org`).
+2. **Obtén o seu access token**:
+   ```bash
+   curl -X POST https://matrix.org/_matrix/client/v3/login \
+     -H 'Content-Type: application/json' \
+     -d '{"type":"m.login.password","identifier":{"type":"m.id.user","user":"my-lsd-bot"},"password":"<contrasinal-do-bot>"}'
+   ```
+   (En Element tamén está en *Axustes → Axuda e sobre → Token de acceso*.)
+3. **Configura o `.env`** e reinicia LSD:
+   ```
+   MATRIX_HOMESERVER=https://matrix.org
+   MATRIX_USER=@my-lsd-bot:matrix.org
+   MATRIX_ACCESS_TOKEN=<token do paso 2>
+   MATRIX_ALLOWED_USERS=@your-user:matrix.org
+   ```
+   Sen estas variables o bot simplemente non arranca. O log de arranque mostra `Matrix: bot conectado como …` ao conectar.
+4. **Crea unha sala sen cifrar** en Element (*axustes avanzados → desactivar cifrado* ao creala) e convida ao bot escribindo o seu MXID completo (`@my-lsd-bot:matrix.org`) — as contas novas non aparecen no buscador de usuarios. O bot acepta automaticamente convites só de usuarios autorizados.
+
+Notas:
+
+- `MATRIX_ALLOWED_USERS` é unha lista branca de MXIDs separados por comas. O bot **ignora en silencio calquera outro usuario** — mantéñea curta: o xestor pode crear e pechar sesións.
+- Os DMs de Matrix cífranse por defecto e o bot non pode ler salas cifradas; usa unha sala dedicada sen cifrar. En matrix.org iso significa que o operador do servidor podería ver o contido — cun servidor propio queda nas túas mans (o transporte vai cifrado con TLS en ambos os casos).
+- O informe periódico do xestor (`REPORT_INTERVAL_MIN`) tamén se envía ás salas do bot.
 
 ---
 

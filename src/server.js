@@ -13,6 +13,7 @@ import * as registry from './registry.js';
 import * as history from './history.js';
 import { readConversation } from './conversation.js';
 import { maybeRunFirstSetup } from './firstrun.js';
+import { startMatrixBot, sendMatrixReport } from './matrix.js';
 
 const app = express();
 app.use(express.json({ limit: '256kb' }));
@@ -246,6 +247,8 @@ async function runAutoReport() {
     reports.push({ ts: new Date().toISOString(), reply: r.reply, toolLog: r.toolLog });
     if (reports.length > 20) reports.shift();
     console.log('Informe periódico generado');
+    // Si el bot de Matrix está activo, el informe llega también a sus salas
+    sendMatrixReport(`⏱ Informe periódico:\n${r.reply}`);
   } catch (err) {
     console.warn(`Informe periódico falló: ${err.message}`);
   }
@@ -388,6 +391,8 @@ async function main() {
   // Archivador duradero del historial (dirs + offsets; lo dispara el monitor)
   await history.initHistory().catch((err) => console.warn(`historial: init falló: ${err.message}`));
   scheduleReporter();
+  // Bot de Matrix (opcional; solo si hay MATRIX_* en .env, nunca bloquea)
+  startMatrixBot();
   // Apagado limpio: parar el monitor YA para que no archive las sesiones que
   // mueran durante el cierre; las activas deben quedar archived:false para
   // que recovery las restaure en el próximo arranque

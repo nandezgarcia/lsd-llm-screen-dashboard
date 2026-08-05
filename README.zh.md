@@ -120,9 +120,42 @@ HOST=127.0.0.1                     # 0.0.0.0 = 所有接口（仅在带身份验
 - 使用 `node-pty` + `xterm.js` 实现的**真正 Web 终端**，支持组合键（重音符号）、Chromium 中的全屏键盘锁定，以及 `Ctrl+S`、`Ctrl+T` 等保留键按钮。
 - **活动监控器**每 3 秒比较 hardcopy，将会话分类为 `Working` / `Waiting`。
 - **历史归档器**将 kimi `wire.jsonl` 中的新消息复制到 `data/history/<slug>.jsonl`。
-- 可通过 `REPORT_INTERVAL_MIN` 配置的**周期性管理器报告**，汇总活动会话。
+- 可通过 `REPORT_INTERVAL_MIN` 配置的**周期性管理器报告**，汇总活动会话（若启用 Matrix 机器人，也会推送到 Matrix — 见下文）。
+- **Matrix 机器人（可选）**：通过手机与同一个管理器对话 — 见 [Matrix 机器人](#matrix-机器人可选) 一节。
 - **本地 Ollama 支持**，作为 kimi 会话的可选模型覆盖。
 - **带空格的标签**：UI 中显示人性化的名称，screen 和 URL 使用内部 slug。
+
+---
+
+## Matrix 机器人（可选）
+
+你可以通过 [Matrix](https://matrix.org)（Element 及其他客户端）在手机上与同一个 Deepseek 管理器对话。机器人位于 `src/matrix.js`，只回复白名单用户，并且需要一个**未加密**的房间（不支持端到端加密 E2EE）。
+
+下面的步骤以免费公共 homeserver **matrix.org** 为例 — 但任何 Matrix homeserver 都可以，包括**你自己的服务器**（例如自托管的 Synapse）：只需将 `MATRIX_HOMESERVER` 指向它。私有服务器通常关闭注册，因此需要在服务器上创建机器人账号（Synapse：`register_new_matrix_user -c /etc/matrix-synapse/homeserver.yaml`）。
+
+1. **为机器人创建账号**：在 matrix.org 上（在 Element 中：退出登录并注册新账号，例如 `@my-lsd-bot:matrix.org`）。
+2. **获取访问令牌（access token）**：
+   ```bash
+   curl -X POST https://matrix.org/_matrix/client/v3/login \
+     -H 'Content-Type: application/json' \
+     -d '{"type":"m.login.password","identifier":{"type":"m.id.user","user":"my-lsd-bot"},"password":"<机器人密码>"}'
+   ```
+   （在 Element 中也可以在 *设置 → 帮助与关于 → 访问令牌* 找到。）
+3. **配置 `.env`** 并重启 LSD：
+   ```
+   MATRIX_HOMESERVER=https://matrix.org
+   MATRIX_USER=@my-lsd-bot:matrix.org
+   MATRIX_ACCESS_TOKEN=<第 2 步的令牌>
+   MATRIX_ALLOWED_USERS=@your-user:matrix.org
+   ```
+   没有这些变量，机器人不会启动。启动日志中出现 `Matrix: bot conectado como …` 表示连接成功。
+4. **创建未加密房间**：在 Element 中（创建时在 *高级设置 → 关闭加密*），输入机器人的完整 MXID（`@my-lsd-bot:matrix.org`）邀请它 — 新账号不会出现在用户搜索中。机器人只会自动接受白名单用户的邀请。
+
+注意事项：
+
+- `MATRIX_ALLOWED_USERS` 是以逗号分隔的 MXID 白名单。机器人会**静默忽略其他所有人** — 请保持白名单严格：管理器可以创建和关闭会话。
+- Matrix 私聊默认加密，机器人无法读取加密房间；请使用一个专用的未加密房间。在 matrix.org 上，这意味着 homeserver 运营者可以看到消息内容 — 使用自己的服务器则内容掌握在你手中（两种情况下传输都经过 TLS 加密）。
+- 周期性管理器报告（`REPORT_INTERVAL_MIN`）也会推送到机器人所在的房间。
 
 ---
 

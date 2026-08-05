@@ -416,9 +416,14 @@ function applyFullscreenHelp() {
 }
 applyFullscreenHelp();
 
-// ---------- Archivadas: reabrir / guardar historial / eliminar ----------
+// ---------- Archivadas: modal con buscador (botón 🗄 de la cabecera) ----------
 
 const archivedList = document.getElementById('archived-list');
+const archivedBtn = document.getElementById('archived-btn');
+const archivedSearch = document.getElementById('archived-search');
+// Última lista recibida del servidor: el buscador filtra sobre ella sin
+// refetch (refreshSessions la actualiza cada 4 s y al cambiar de idioma)
+let lastArchived = [];
 
 function downloadText(filename, text) {
   const a = document.createElement('a');
@@ -458,13 +463,20 @@ async function saveHistory(a) {
 }
 
 function renderArchived(archived) {
-  document.getElementById('archived-count').textContent = archived.length;
+  lastArchived = archived;
+  archivedBtn.textContent = t('header.archivedCount', { count: archived.length });
+  // Filtro del buscador: por etiqueta o por id, sin distinguir mayúsculas
+  const q = archivedSearch.value.trim().toLowerCase();
+  const filtered = q
+    ? archived.filter((a) =>
+        (a.label || a.name).toLowerCase().includes(q) || a.name.toLowerCase().includes(q))
+    : archived;
   archivedList.innerHTML = '';
-  if (!archived.length) {
-    archivedList.innerHTML = `<li class="empty">${t('sessions.emptyArchived')}</li>`;
+  if (!filtered.length) {
+    archivedList.innerHTML = `<li class="empty">${t(archived.length ? 'archived.noMatch' : 'sessions.emptyArchived')}</li>`;
     return;
   }
-  for (const a of archived) {
+  for (const a of filtered) {
     const display = a.label || a.name;
     const li = document.createElement('li');
     const label = document.createElement('span');
@@ -517,12 +529,25 @@ function renderArchived(archived) {
   }
 }
 
-// Secciones plegables. Activas nace abierta; Archivadas se abre sola cuando hay
-// elementos (si no, los botones de reabrir/guardar/eliminar no se ven). Si el
-// usuario la pliega a mano, se respeta (localStorage).
+// Modal de archivadas: abre desde el 🗄 de la cabecera (con el buscador limpio
+// y el foco puesto), cierra con ✕ o clic fuera; el buscador refiltra en vivo
+const archivedModal = document.getElementById('archived-modal');
+archivedBtn.onclick = () => {
+  archivedModal.classList.remove('hidden');
+  archivedSearch.value = '';
+  renderArchived(lastArchived);
+  archivedSearch.focus();
+};
+document.getElementById('archived-close').onclick = () => archivedModal.classList.add('hidden');
+archivedModal.onclick = (e) => {
+  if (e.target === archivedModal) archivedModal.classList.add('hidden');
+};
+archivedSearch.oninput = () => renderArchived(lastArchived);
+
+// Sección plegable de activas. Nace abierta; si el usuario la pliega a mano,
+// se respeta (localStorage).
 for (const [headerId, listEl, key] of [
   ['active-header', sessionList, 'ls-active'],
-  ['archived-header', archivedList, 'ls-archived'],
 ]) {
   const h = document.getElementById(headerId);
   const arrow = h.querySelector('.arrow');
@@ -536,14 +561,6 @@ for (const [headerId, listEl, key] of [
     setCollapsed(c);
     localStorage.setItem(key, c ? 'collapsed' : 'open');
   };
-  // auto-expandir Archivadas cuando hay contenido y el usuario no ha decidido
-  if (key === 'ls-archived') {
-    const origRender = renderArchived;
-    renderArchived = (archived) => {
-      origRender(archived);
-      if (archived.length && localStorage.getItem(key) === null) setCollapsed(false);
-    };
-  }
 }
 
 // ---------- Sesiones ----------

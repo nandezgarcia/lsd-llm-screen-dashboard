@@ -447,7 +447,7 @@ input:disabled { opacity: 0.45; }
 
 /* Explorador de directorios */
 #dir-picker-btn { background: var(--border); padding: 7px 10px; }
-#dir-modal, #analyze-modal, #confirm-modal, #config-modal {
+#dir-modal, #analyze-modal, #confirm-modal, #config-modal, #archived-modal {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.55);
@@ -456,7 +456,7 @@ input:disabled { opacity: 0.45; }
   justify-content: center;
   z-index: 100;
 }
-#dir-modal.hidden, #analyze-modal.hidden, #confirm-modal.hidden, #config-modal.hidden { display: none; }
+#dir-modal.hidden, #analyze-modal.hidden, #confirm-modal.hidden, #config-modal.hidden, #archived-modal.hidden { display: none; }
 .config-dialog { width: min(680px, 92vw); max-height: 85vh; overflow-y: auto; }
 .config-dialog .dir-header { font-size: 14px; font-weight: bold; color: var(--text); }
 #config-close { background: transparent; color: var(--danger); padding: 2px 8px; }
@@ -472,6 +472,19 @@ input:disabled { opacity: 0.45; }
   padding: 12px;
 }
 .analyze-dialog { width: min(440px, 90vw); }
+/* Modal de archivadas: la lista crece con la ventana y el buscador arriba */
+.archived-dialog { width: min(600px, 92vw); max-height: 80vh; }
+#archived-close { background: transparent; color: var(--danger); padding: 2px 8px; }
+#archived-search { width: 100%; margin-bottom: 8px; }
+#archived-modal #archived-list {
+  flex: 1;
+  max-height: none;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  min-height: 160px;
+}
+#archived-modal #archived-list li.empty { color: var(--muted); }
 .analyze-dialog h3 { margin: 0 0 8px; font-size: 15px; }
 .analyze-dialog p { margin: 0 0 8px; font-size: 13px; }
 .analyze-dialog code { font: 12px ui-monospace, monospace; color: var(--accent); }

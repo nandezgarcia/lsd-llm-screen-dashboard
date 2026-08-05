@@ -120,9 +120,41 @@ HOST=127.0.0.1                     # 0.0.0.0 = all interfaces (use only with aut
 - **Real web terminal** with `node-pty` + `xterm.js`, including support for composed keys (accents), fullscreen keyboard lock in Chromium and buttons for reserved keys like `Ctrl+S` or `Ctrl+T`.
 - **Activity monitor** classifies sessions as `Working` / `Waiting` by comparing hardcopies every 3 seconds.
 - **History archiver** copies new messages from kimi's `wire.jsonl` to `data/history/<slug>.jsonl`.
-- **Periodic manager report** configurable via `REPORT_INTERVAL_MIN` summarizing active sessions.
+- **Periodic manager report** configurable via `REPORT_INTERVAL_MIN` summarizing active sessions (also pushed to Matrix if the bot is enabled — see below).
 - **Local Ollama support** as an optional model override for kimi sessions.
 - **Labels with spaces**: human-friendly names in the UI, internal slugs for screen and URLs.
+
+---
+
+## Matrix bot (optional)
+
+You can talk to the same Deepseek manager from your phone through [Matrix](https://matrix.org) (Element and other clients). The bot lives in `src/matrix.js`, answers only whitelisted users and needs an **unencrypted** room (no E2EE support).
+
+The recipe below uses **matrix.org**, the free public homeserver — but any Matrix homeserver works, including **your own** (e.g. a self-hosted Synapse): just point `MATRIX_HOMESERVER` at it. With a private server, account registration is usually closed, so create the bot account on the server itself (for Synapse: `register_new_matrix_user -c /etc/matrix-synapse/homeserver.yaml`).
+
+1. **Create an account for the bot** on matrix.org (from Element: log out and register a new account, e.g. `@my-lsd-bot:matrix.org`).
+2. **Get its access token**:
+   ```bash
+   curl -X POST https://matrix.org/_matrix/client/v3/login \
+     -H 'Content-Type: application/json' \
+     -d '{"type":"m.login.password","identifier":{"type":"m.id.user","user":"my-lsd-bot"},"password":"<bot-password>"}'
+   ```
+   (In Element you can also find it under *Settings → Help & About → Access Token*.)
+3. **Configure `.env`** and restart LSD:
+   ```
+   MATRIX_HOMESERVER=https://matrix.org
+   MATRIX_USER=@my-lsd-bot:matrix.org
+   MATRIX_ACCESS_TOKEN=<token from step 2>
+   MATRIX_ALLOWED_USERS=@your-user:matrix.org
+   ```
+   Without these variables the bot simply does not start. The startup log shows `Matrix: bot conectado como …` when it connects.
+4. **Create an unencrypted room** in Element (*advanced settings → disable encryption* when creating it) and invite the bot typing its full MXID (`@my-lsd-bot:matrix.org`) — new accounts don't show up in the user search. The bot auto-joins invitations from whitelisted users only.
+
+Notes:
+
+- `MATRIX_ALLOWED_USERS` is a comma-separated whitelist of MXIDs. The bot **silently ignores everyone else** — keep it tight: the manager can create and kill sessions.
+- Matrix DMs are encrypted by default and the bot cannot read encrypted rooms; use one dedicated unencrypted room. On matrix.org that means message content is visible to the homeserver operator — with your own server it stays in your hands (transport is TLS either way).
+- The periodic manager report (`REPORT_INTERVAL_MIN`) is also pushed to the bot's rooms.
 
 ---
 
