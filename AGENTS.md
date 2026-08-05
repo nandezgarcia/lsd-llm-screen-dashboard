@@ -435,7 +435,9 @@ la línea de comandos del propio shell y se automata). Buscar el PID por puerto:
   elegir el modelo en el desplegable de crear — aparece solo si corre).
 - Dependencias: express, ws, node-pty (nativa), matrix-bot-sdk, @xterm/xterm, @xterm/addon-fit
   (assets en `/vendor/*`, sin CDN). Sin tests automatizados (verificación manual
-  node/curl). Sin git.
+  node/curl). Repo en GitHub: `nandezgarcia/lsd-llm-screen-dashboard` (ojo: el
+  git local usa la cuenta `nandezgarcia-in2ai`, que NO tiene permiso — para
+  pushear: `gh auth switch --user nandezgarcia`, push, y restaurar).
 - **Instaladores (25/07/26)**: `install.sh` (Linux/macOS/WSL2) e `install.ps1`
   (Windows vía WSL2) — ver sección Arranque. Bind configurable con `HOST` en
   `.env` (cierra el pendiente del bind a 127.0.0.1; el `.env` de ESTA máquina
