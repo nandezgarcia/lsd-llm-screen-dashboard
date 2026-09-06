@@ -484,6 +484,7 @@ input:disabled { opacity: 0.45; }
   min-width: 0;
 }
 .deploy-dot { font-size: 16px; color: var(--muted); padding-bottom: 6px; }
+.publish-domain-suffix { font-size: 14px; font-weight: 600; padding-bottom: 8px; }
 
 /* Ventana emergente de progreso/resultado del despliegue */
 .deploy-run-dialog { width: min(720px, 92vw); }

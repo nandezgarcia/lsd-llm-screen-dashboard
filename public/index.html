@@ -193,6 +193,26 @@
     </div>
   </div>
 
+  <!-- Publicar: el usuario solo aporta el subdominio; el resto es la config -->
+  <div id="publish-modal" class="hidden">
+    <div class="dir-dialog analyze-dialog">
+      <h3 data-i18n="publish.modalTitle">🌐 Publicar web</h3>
+      <p id="publish-text"></p>
+      <div class="deploy-fqdn-row">
+        <label>
+          <span data-i18n="publish.subdomainLabel">Subdominio</span>
+          <input id="publish-subdomain" data-i18n-ph="publish.subdomainPh" placeholder="mi-web" autocomplete="off" />
+        </label>
+        <span class="deploy-dot">.</span>
+        <span id="publish-domain-suffix" class="publish-domain-suffix">kiokao.com</span>
+      </div>
+      <div class="dir-actions">
+        <button id="publish-cancel" type="button" class="btn-secondary" data-i18n="confirm.no">Cancelar</button>
+        <button id="publish-go" type="button" data-i18n="publish.confirm">Publicar</button>
+      </div>
+    </div>
+  </div>
+
   <div id="archived-modal" class="hidden">
     <div class="dir-dialog archived-dialog">
       <div class="dir-header">
@@ -270,6 +290,43 @@
               usuario</strong> (sin contraseña): haz antes
               <code>ssh-copy-id usuario@servidor</code> y verifícalo con
               <strong>Probar</strong>. Vacío = botón ⬆ desactivado.
+            </p>
+          </details>
+        </fieldset>
+        <fieldset>
+          <legend data-i18n="config.legendPublish">Publicación web — dónde publica el botón 🌐 Publicar</legend>
+          <div class="config-grid">
+            <label><span data-i18n="publish.domainLabel">Dominio</span>
+              <input id="cfg-publish-domain" placeholder="kiokao.com" autocomplete="off" />
+            </label>
+            <label><span data-i18n="publish.hostLabel">Servidor (host/IP)</span> <span class="muted" data-i18n="publish.hostOptional">(vacío = el propio dominio)</span>
+              <input id="cfg-publish-host" autocomplete="off" />
+            </label>
+            <label><span data-i18n="publish.userLabel">Usuario SSH</span>
+              <input id="cfg-publish-user" autocomplete="off" />
+            </label>
+            <label class="cfg-key"><span data-i18n="publish.passwordLabel">Contraseña SSH</span> <span id="cfg-publish-pass-hint" class="muted"></span>
+              <input id="cfg-publish-password" type="password" data-i18n-ph="publish.passwordPh" placeholder="sin cambios" autocomplete="new-password" />
+            </label>
+            <label><span data-i18n="publish.pathLabel">Ruta base remota</span>
+              <input id="cfg-publish-path" placeholder="/var/www" autocomplete="off" />
+            </label>
+            <label><span data-i18n="publish.portLabel">Puerto SSH</span>
+              <input id="cfg-publish-port" type="number" min="1" max="65535" placeholder="22" />
+            </label>
+          </div>
+          <button id="publish-test" type="button" class="btn-secondary" data-i18n="publish.test" data-i18n-title="publish.testTitle" title="Probar la conexión SSH por contraseña">Probar conexión</button>
+          <span id="publish-test-result" class="deploy-test-result"></span>
+          <details class="info-help left">
+            <summary data-i18n-title="config.helpTitle" title="Ayuda de configuración">ⓘ</summary>
+            <p class="help" data-i18n-html="publish.configHelp">
+              Destino del botón <strong>🌐 Publicar</strong> de cada sesión publicable
+              (su carpeta tiene <code>index.html</code> o <code>package.json</code>):
+              el gestor sube la web por SSH con <strong>contraseña</strong> (vía
+              <code>sshpass</code>, necesario en este equipo) y la deja servida en
+              <code>https://&lt;subdominio&gt;.&lt;dominio&gt;</code> (nginx + SSL).
+              La contraseña solo se guarda en el <code>.env</code> y nunca se muestra.
+              Sin usuario y contraseña, el botón Publicar no funciona.
             </p>
           </details>
         </fieldset>

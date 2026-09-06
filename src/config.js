@@ -55,6 +55,34 @@ export function parseDeployTargets(json) {
     .slice(0, 20);
 }
 
+// Config de "Publicar" (botón 🌐): UN solo destino fijo (por defecto el hosting
+// de kiokao.com) con auth por CONTRASEÑA (sshpass), a diferencia de ⬆ Subir
+// (DEPLOY_TARGETS, varios destinos con clave SSH). La contraseña vive solo en
+// .env y en process.env: el gestor la usa como $PUBLISH_PASSWORD vía sshpass -e
+// (nunca aparece en prompts ni en la API pública).
+const PUBLISH_DOMAIN_RE = /^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?\.[a-z]{2,}$/;
+function publishFromEnv() {
+  const domain = PUBLISH_DOMAIN_RE.test(process.env.PUBLISH_DOMAIN || '')
+    ? process.env.PUBLISH_DOMAIN
+    : 'kiokao.com';
+  const host = TARGET_RE.host.test(process.env.PUBLISH_HOST || '')
+    ? process.env.PUBLISH_HOST
+    : '';
+  return {
+    domain,
+    // vacío = el servidor es el propio dominio
+    host: host || domain,
+    user: TARGET_RE.user.test(process.env.PUBLISH_USER || '') ? process.env.PUBLISH_USER : '',
+    password: process.env.PUBLISH_PASSWORD || '',
+    basePath: TARGET_RE.basePath.test(process.env.PUBLISH_BASE_PATH || '')
+      ? process.env.PUBLISH_BASE_PATH
+      : '/var/www',
+    port: Number(process.env.PUBLISH_PORT) > 0 && Number(process.env.PUBLISH_PORT) < 65536
+      ? Number(process.env.PUBLISH_PORT)
+      : 22,
+  };
+}
+
 export const config = {
   root: ROOT,
   port: Number(process.env.PORT || 3000),
@@ -81,6 +109,8 @@ export const config = {
   // Sin secretos aquí: la auth son las claves ~/.ssh del usuario. El despliegue
   // lo ejecuta el AGENTE de la sesión por SSH, orquestado por el gestor.
   deployTargets: parseDeployTargets(process.env.DEPLOY_TARGETS),
+  // Publicación web (botón 🌐 Publicar): destino único con contraseña
+  publish: publishFromEnv(),
 };
 
 // Variables que recibe cada sesión kimi dentro de screen.
@@ -241,6 +271,16 @@ export function publicConfig() {
     matrixEnabled: Boolean(config.matrixHomeserver && config.matrixAccessToken),
     // Destinos de despliegue SSH (sin secretos: la auth son las ~/.ssh del usuario)
     deployTargets: config.deployTargets,
+    // Publicación web: configuración visible EXCEPTO la contraseña (solo flag)
+    publish: {
+      domain: config.publish.domain,
+      host: config.publish.host,
+      user: config.publish.user,
+      basePath: config.publish.basePath,
+      port: config.publish.port,
+      passwordSet: Boolean(config.publish.password),
+      configured: Boolean(config.publish.user && config.publish.password),
+    },
     apiKeySet: Boolean(key),
     apiKeyHint: key ? `••••${key.slice(-4)}` : '',
   };
@@ -259,8 +299,14 @@ const EDITABLE = {
   sessionCli: 'SESSION_CLI',
   reportIntervalMin: 'REPORT_INTERVAL_MIN',
   deployTargets: 'DEPLOY_TARGETS',
+  publishDomain: 'PUBLISH_DOMAIN',
+  publishHost: 'PUBLISH_HOST',
+  publishUser: 'PUBLISH_USER',
+  publishPassword: 'PUBLISH_PASSWORD',
+  publishBasePath: 'PUBLISH_BASE_PATH',
+  publishPort: 'PUBLISH_PORT',
 };
-const CLEARABLE = new Set(['KIMI_SESSION_MODEL', 'KIMI_SESSION_BASE_URL', 'DEPLOY_TARGETS']);
+const CLEARABLE = new Set(['KIMI_SESSION_MODEL', 'KIMI_SESSION_BASE_URL', 'DEPLOY_TARGETS', 'PUBLISH_HOST']);
 
 export function updateEnv(updates) {
   const changed = {};
@@ -298,6 +344,9 @@ export function updateEnv(updates) {
   }
   if (changed.DEPLOY_TARGETS !== undefined) {
     config.deployTargets = parseDeployTargets(changed.DEPLOY_TARGETS);
+  }
+  if (Object.keys(changed).some((k) => k.startsWith('PUBLISH_'))) {
+    config.publish = publishFromEnv();
   }
   return changed;
 }

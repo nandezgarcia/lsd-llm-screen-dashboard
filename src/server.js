@@ -32,12 +32,24 @@ const runFile = promisify(execFile);
 app.get('/api/sessions', asyncRoute(async (_req, res) => {
   const activity = getActivity();
   const saved = await registry.getAll();
-  const sessions = (await screen.listSessions()).map((s) => ({
-    ...s,
-    activity: activity[s.name.slice(screen.PREFIX.length)]?.activity || null,
-    contextSavedAt: activity[s.name.slice(screen.PREFIX.length)]?.contextSavedAt || null,
-    lastMsgAt: activity[s.name.slice(screen.PREFIX.length)]?.lastMsgAt || null,
-    label: saved[s.name.slice(screen.PREFIX.length)]?.label || null,
+  const sessions = await Promise.all((await screen.listSessions()).map(async (s) => {
+    const short = s.name.slice(screen.PREFIX.length);
+    // Publicable: el workdir pinta una web (estática o con build npm)
+    const workdir = saved[short]?.workdir;
+    const publishable = workdir
+      ? await Promise.any([
+          fs.access(path.join(workdir, 'index.html')),
+          fs.access(path.join(workdir, 'package.json')),
+        ]).then(() => true, () => false)
+      : false;
+    return {
+      ...s,
+      activity: activity[short]?.activity || null,
+      contextSavedAt: activity[short]?.contextSavedAt || null,
+      lastMsgAt: activity[short]?.lastMsgAt || null,
+      label: saved[short]?.label || null,
+      publishable,
+    };
   }));
   const aliveNames = new Set(sessions.map((s) => s.name.slice(screen.PREFIX.length)));
   const archived = Object.entries(saved)
@@ -310,6 +322,100 @@ app.post('/api/sessions/:name/deploy', asyncRoute(async (req, res) => {
   res.json(await runManagerChat([{ role: 'user', content: prompt }], short, 25));
 }));
 
+// ---------- Publicación web (botón 🌐 Publicar) ----------
+// Destino ÚNICO configurado en ⚙ (PUBLISH_*: dominio kiokao.com por defecto).
+// A diferencia de ⬆ Subir (clave SSH), la auth es por CONTRASEÑA vía sshpass:
+// la contraseña está en el entorno del proceso (PUBLISH_PASSWORD) y los
+// comandos del gestor la usan como $PUBLISH_PASSWORD con `sshpass -e` — nunca
+// se escribe en el prompt, en el toolLog ni sale por la API.
+
+// sshpass es imprescindible para la auth por contraseña; sin él, error accionable
+async function assertSshpass() {
+  try {
+    await runFile('bash', ['-lc', 'command -v sshpass']);
+  } catch {
+    throw new Error('Falta sshpass en este equipo (instálalo: sudo apt install sshpass)');
+  }
+}
+
+// Config efectiva de publicación: la guardada, con overrides puntuales del body
+// (permite Probar con cambios del formulario aún sin guardar; la contraseña del
+// body solo se usa si viene con valor — si no, la del .env)
+function publishConfigFrom(body = {}) {
+  const p = config.publish;
+  const clean = (v) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : null);
+  return {
+    domain: clean(body.domain) || p.domain,
+    host: clean(body.host) || clean(body.domain) || p.host,
+    user: clean(body.user) || p.user,
+    password: clean(body.password) || p.password,
+    basePath: clean(body.basePath) || p.basePath,
+    port: Number(body.port) > 0 ? Number(body.port) : p.port,
+  };
+}
+
+// Probar la conexión SSH por contraseña del destino de publicación
+app.post('/api/publish/test', asyncRoute(async (req, res) => {
+  await assertSshpass();
+  const p = publishConfigFrom(req.body);
+  if (!p.user || !p.password) {
+    return res.status(400).json({ error: 'Publicación no configurada: faltan usuario y/o contraseña (⚙ Configuración → Publicación web)' });
+  }
+  try {
+    await runFile('sshpass', [
+      '-e', 'ssh',
+      '-o', 'ConnectTimeout=8', '-o', 'StrictHostKeyChecking=accept-new',
+      '-o', 'NumberOfPasswordPrompts=1',
+      '-p', String(p.port), `${p.user}@${p.host}`, 'true',
+    ], { env: { ...process.env, SSHPASS: p.password } });
+    res.json({ ok: true });
+  } catch (err) {
+    res.json({ ok: false, error: String(err.stderr || err.message).slice(0, 300) });
+  }
+}));
+
+// Publicar la web de una sesión: el GESTOR lo ejecuta todo con run_command
+// (sshpass + rsync + nginx + certbot). El cliente solo manda { subdomain } —
+// dominio, servidor, usuario y contraseña salen de la configuración.
+app.post('/api/sessions/:name/publish', asyncRoute(async (req, res) => {
+  const short = req.params.name;
+  if (!screen.isValidName(short)) return res.status(400).json({ error: 'Nombre inválido' });
+  const entry = (await registry.getAll())[short] || {};
+  if (!entry.workdir) {
+    return res.status(400).json({ error: 'La sesión no tiene workdir conocido en el registry' });
+  }
+  const p = config.publish;
+  if (!p.user || !p.password) {
+    return res.status(400).json({ error: 'Publicación no configurada: faltan usuario y/o contraseña (⚙ Configuración → Publicación web)' });
+  }
+  await assertSshpass();
+  const subdomain = String(req.body?.subdomain || '').trim().toLowerCase();
+  if (!/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(subdomain)) {
+    return res.status(400).json({ error: 'Subdominio inválido (letras minúsculas, números y guiones)' });
+  }
+  const fqdn = `${subdomain}.${p.domain}`;
+  const remoteDir = `${p.basePath.replace(/\/$/, '')}/${fqdn}`;
+  const prompt =
+    `Publica AHORA la web del proyecto de la sesión '${short}'` + (entry.label ? ` ("${entry.label}")` : '') +
+    ` en https://${fqdn}. Lo ejecutas TÚ con run_command paso a paso (NO uses send_input ni delegues en la sesión). ` +
+    'Datos de la publicación:\n' +
+    `- Workdir local del proyecto: ${entry.workdir}\n` +
+    `- Servidor: ${p.user}@${p.host} (puerto SSH ${p.port}), auth por CONTRASEÑA: la contraseña está en la variable de entorno $PUBLISH_PASSWORD del entorno de bash. NUNCA la escribas literalmente en un comando, ni la muestres ni la subas a ningún sitio. Cada run_command es una shell nueva: empieza con export SSHPASS="$PUBLISH_PASSWORD" y usa sshpass -e, p. ej. sshpass -e ssh -o StrictHostKeyChecking=accept-new -p ${p.port} ${p.user}@${p.host} '<comando>' o sshpass -e rsync -avz -e "ssh -p ${p.port} -o StrictHostKeyChecking=accept-new" ...\n` +
+    `- Ruta remota: ${remoteDir}\n` +
+    `- URL final objetivo: https://${fqdn}\n` +
+    'Pasos obligatorios, verificando la salida de cada comando antes de seguir:\n' +
+    '1. Inspecciona el workdir local (ls, README, package.json…): si es una web ESTÁTICA (index.html en la raíz) se sube tal cual; si tiene build (npm run build que genera dist/ o build/), constrúyela primero en local y sube el resultado.\n' +
+    `2. Sube el contenido con rsync (excluye .git, node_modules, .env y cualquier secreto — NUNCA subas el .env; crea antes ${remoteDir} en el servidor).\n` +
+    `3. nginx: virtualhost para ${fqdn} con root ${remoteDir} (si el proyecto necesita un proceso — puerto, API— en vez de estático, monta el servicio systemd y el proxy_pass como corresponda). Para sudo en el servidor usa la contraseña: echo "$PUBLISH_PASSWORD" | sudo -S <comando>.\n` +
+    `4. SSL: certbot --nginx -d ${fqdn} con --non-interactive --agree-tos -m admin@${p.domain} --redirect (vía sudo -S). Si falla por DNS (el FQDN no resuelve al servidor), dilo claramente y deja el vhost HTTP funcionando.\n` +
+    `5. Permisos y seguridad: propietario correcto, nada world-writable.\n` +
+    `6. Verificación final: curl -sI https://${fqdn} (o http:// si no hubo SSL) debe responder.\n` +
+    'Si un comando falla, lee el error, corrige y reintenta (tienes margen de iteraciones). ' +
+    'Responde con un resumen: URL final, qué quedó configurado y cualquier pendiente (DNS, etc.).';
+  res.json(await runManagerChat([{ role: 'user', content: prompt }], short, 25));
+}));
+
+
 // ---------- Informe periódico del gestor ----------
 // Cada config.reportIntervalMin minutos (0 = desactivado) el gestor revisa las
 // sesiones activas y genera un resumen; la web lo recoge vía GET /api/reports
@@ -436,6 +542,26 @@ app.post('/api/config', asyncRoute(async (req, res) => {
         error: 'Destinos inválidos: JSON array de {name, user, host, port?, basePath} ' +
           '(name [\\w-], user/host sin espacios, basePath absoluta)',
       });
+    }
+  }
+  // Destinos de publicación: mismos regex que en config.js (acaban como args
+  // de ssh/rsync y en prompts del gestor)
+  if (body.publishDomain && !/^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?\.[a-z]{2,}$/.test(body.publishDomain.trim().toLowerCase())) {
+    return res.status(400).json({ error: 'Dominio de publicación inválido (p. ej. kiokao.com)' });
+  }
+  if (body.publishHost && !/^[\w.-]{1,100}$/.test(body.publishHost.trim())) {
+    return res.status(400).json({ error: 'Host de publicación inválido' });
+  }
+  if (body.publishUser && !/^[a-z_][a-z0-9_-]{0,31}$/i.test(body.publishUser.trim())) {
+    return res.status(400).json({ error: 'Usuario de publicación inválido' });
+  }
+  if (body.publishBasePath && !/^\/[\w./-]{0,200}$/.test(body.publishBasePath.trim())) {
+    return res.status(400).json({ error: 'Ruta base de publicación inválida (absoluta, sin espacios)' });
+  }
+  if (body.publishPort !== undefined && body.publishPort !== '') {
+    const n = Number(body.publishPort);
+    if (!Number.isInteger(n) || n < 1 || n > 65535) {
+      return res.status(400).json({ error: 'Puerto SSH de publicación inválido (1-65535)' });
     }
   }
   const changed = updateEnv(body);

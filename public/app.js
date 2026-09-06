@@ -782,6 +782,18 @@ async function refreshSessions() {
         openDeployModal(short, display);
       };
       li.append(up);
+      // Publicar solo tiene sentido si la carpeta pinta una web (flag del servidor)
+      if (s.publishable) {
+        const pub = document.createElement('button');
+        pub.className = 'up-btn publish-btn';
+        pub.textContent = t('publish.btn');
+        pub.title = t('publish.btnTitle');
+        pub.onclick = (e) => {
+          e.stopPropagation();
+          openPublishModal(short, display);
+        };
+        li.append(pub);
+      }
       const kill = document.createElement('button');
       kill.className = 'kill-btn';
       kill.textContent = '📦';
@@ -1078,9 +1090,16 @@ const cfgFields = {
   kimiSessionBaseUrl: document.getElementById('cfg-session-url'),
   deepseekApiKey: document.getElementById('cfg-api-key'),
   reportIntervalMin: document.getElementById('cfg-report-interval'),
+  publishDomain: document.getElementById('cfg-publish-domain'),
+  publishHost: document.getElementById('cfg-publish-host'),
+  publishUser: document.getElementById('cfg-publish-user'),
+  publishPassword: document.getElementById('cfg-publish-password'),
+  publishBasePath: document.getElementById('cfg-publish-path'),
+  publishPort: document.getElementById('cfg-publish-port'),
 };
 const cfgStatus = document.getElementById('cfg-status');
 const cfgKeyHint = document.getElementById('cfg-key-hint');
+const cfgPublishPassHint = document.getElementById('cfg-publish-pass-hint');
 const cfgSessionCli = document.getElementById('cfg-session-cli');
 const createCli = document.getElementById('create-cli');
 
@@ -1139,6 +1158,17 @@ async function loadConfig() {
     );
     cfgKeyHint.textContent = c.apiKeySet ? t('config.keyHintSet', { hint: c.apiKeyHint }) : t('config.keyHintUnset');
     cfgFields.reportIntervalMin.value = c.reportIntervalMin ?? 0;
+    if (c.publish) {
+      cfgFields.publishDomain.value = c.publish.domain || '';
+      cfgFields.publishHost.value = c.publish.host && c.publish.host !== c.publish.domain ? c.publish.host : '';
+      cfgFields.publishUser.value = c.publish.user || '';
+      cfgFields.publishPassword.value = '';
+      cfgFields.publishBasePath.value = c.publish.basePath || '';
+      cfgFields.publishPort.value = c.publish.port ?? '';
+      cfgPublishPassHint.textContent = c.publish.passwordSet
+        ? t('publish.passSet')
+        : t('publish.passUnset');
+    }
     deployTargetsEl.innerHTML = '';
     for (const tg of c.deployTargets || []) addDeployTargetRow(tg);
     syncSessionUrlState();
@@ -1164,6 +1194,7 @@ document.getElementById('config-form').onsubmit = async (e) => {
       body: JSON.stringify(body),
     });
     cfgFields.deepseekApiKey.value = ''; // nunca dejar la key escrita en el form
+    cfgFields.publishPassword.value = ''; // idem con la contraseña de publicación
     cfgStatus.textContent = changed.length
       ? t('config.saved', { changed: changed.join(', ') })
       : t('config.noChanges');
@@ -1357,6 +1388,102 @@ document.getElementById('deploy-go').onclick = async () => {
   } finally {
     delete deployRunLog.dataset.running;
     deployRunLog.scrollTop = deployRunLog.scrollHeight;
+  }
+};
+
+// ---------- Publicación web (botón 🌐, destino único de ⚙ Configuración) ----------
+// El usuario SOLO aporta el subdominio; dominio/servidor/usuario/contraseña
+// salen de la configuración (PUBLISH_*). El gestor ejecuta todo con run_command.
+
+const publishModal = document.getElementById('publish-modal');
+const publishText = document.getElementById('publish-text');
+const publishSubdomain = document.getElementById('publish-subdomain');
+const publishDomainSuffix = document.getElementById('publish-domain-suffix');
+let publishPending = null; // { slug, display } de la sesión a publicar
+
+function openPublishModal(slug, display) {
+  if (!configCache?.publish?.configured) {
+    askConfirm(t('publish.notConfigured'), { title: t('publish.modalTitle'), no: null });
+    return;
+  }
+  publishPending = { slug, display };
+  publishText.textContent = t('publish.modalText', { name: display, domain: configCache.publish.domain });
+  publishSubdomain.value = slug;
+  publishDomainSuffix.textContent = configCache.publish.domain;
+  publishModal.classList.remove('hidden');
+}
+
+document.getElementById('publish-cancel').onclick = () => publishModal.classList.add('hidden');
+publishModal.onclick = (e) => { if (e.target === publishModal) publishModal.classList.add('hidden'); };
+
+document.getElementById('publish-go').onclick = async () => {
+  const sess = publishPending;
+  const subdomain = publishSubdomain.value.trim().toLowerCase();
+  if (!sess) return;
+  if (!subdomain) {
+    publishText.textContent = t('publish.needSubdomain');
+    return;
+  }
+  publishModal.classList.add('hidden');
+  const fqdn = `${subdomain}.${configCache.publish.domain}`;
+  deployRunTitle.textContent = t('publish.runTitle', { name: sess.display, fqdn });
+  deployRunLog.innerHTML = '';
+  deployRunLog.dataset.running = '1';
+  const spin = document.createElement('p');
+  spin.className = 'muted';
+  spin.textContent = t('publish.working');
+  deployRunLog.appendChild(spin);
+  deployRunModal.classList.remove('hidden');
+  try {
+    const result = await api(`/api/sessions/${encodeURIComponent(sess.slug)}/publish`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subdomain }),
+    });
+    spin.remove();
+    for (const tl of result.toolLog || []) deployRunLog.appendChild(toolLogEl(tl));
+    const reply = document.createElement('div');
+    reply.className = 'msg assistant md';
+    reply.innerHTML = renderMarkdown(result.reply || t('chat.noReply'));
+    deployRunLog.appendChild(reply);
+    chatHistory.push(...result.messages);
+    refreshSessions();
+  } catch (err) {
+    spin.remove();
+    const errEl = document.createElement('div');
+    errEl.className = 'msg error';
+    errEl.textContent = `${t('common.error')}: ${err.message}`;
+    deployRunLog.appendChild(errEl);
+  } finally {
+    delete deployRunLog.dataset.running;
+    deployRunLog.scrollTop = deployRunLog.scrollHeight;
+  }
+};
+
+// Probar la conexión del destino de publicación: usa los valores del FORMULARIO
+// si están escritos (permite probar antes de guardar); la contraseña vacía cae
+// a la guardada en el servidor
+document.getElementById('publish-test').onclick = async () => {
+  const result = document.getElementById('publish-test-result');
+  result.className = 'deploy-test-result';
+  result.textContent = t('publish.testing');
+  try {
+    const r = await api('/api/publish/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        domain: cfgFields.publishDomain.value.trim(),
+        host: cfgFields.publishHost.value.trim(),
+        user: cfgFields.publishUser.value.trim(),
+        password: cfgFields.publishPassword.value,
+        port: cfgFields.publishPort.value,
+      }),
+    });
+    result.classList.add(r.ok ? 'ok' : 'fail');
+    result.textContent = r.ok ? t('publish.testOk') : `${t('publish.testFail')} ${r.error || ''}`;
+  } catch (err) {
+    result.classList.add('fail');
+    result.textContent = `${t('publish.testFail')} ${err.message}`;
   }
 };
 

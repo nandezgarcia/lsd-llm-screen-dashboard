@@ -388,9 +388,35 @@ la línea de comandos del propio shell y se automata). Buscar el PID por puerto:
   directo; cerrado a propósito SOLO si HOST=127.0.0.1 o proxy con auth.
   Ojo: kimi nuevo en una carpeta pide "Trust this folder" y bloquea el
   arranque hasta contestar.
+- **Publicación web (botón 🌐 Publicar, 06/09/26)**: destino ÚNICO fijo
+  (`PUBLISH_DOMAIN`, por defecto `kiokao.com`) pensado para "subir la web" sin
+  pensar: el usuario SOLO aporta el subdominio en el modal (por defecto el
+  slug); dominio/servidor/usuario/contraseña/ruta/puerto salen de ⚙ →
+  "Publicación web" (`PUBLISH_*` en `.env`, hot-apply; `PUBLISH_HOST` vacío =
+  el servidor es el propio dominio, CLEARABLE). El botón 🌐 SOLO aparece en
+  sesiones PUBLICABLES: `GET /api/sessions` marca `publishable` si el workdir
+  tiene `index.html` o `package.json`. A diferencia de ⬆ Subir (clave SSH,
+  varios destinos), la auth es por **CONTRASEÑA vía `sshpass`** (dependencia
+  nueva; install.sh la ofrece): la contraseña vive solo en `.env`/process.env y
+  el gestor la usa como `$PUBLISH_PASSWORD` con `sshpass -e` en `run_command`
+  — NUNCA se escribe en el prompt, el toolLog o la API (`publicConfig` solo
+  expone `passwordSet`/`configured`). En remoto, sudo con
+  `echo "$PUBLISH_PASSWORD" | sudo -S`. Endpoints: `POST /api/publish/test`
+  (acepta overrides del formulario para probar ANTES de guardar; la contraseña
+  del body solo se usa si viene con valor) y `POST /api/sessions/:name/publish
+  {subdomain}` (prompt construido en el servidor, runManagerChat con
+  maxIterations=25; el progreso reutiliza el `#deploy-run-modal`). El destino
+  configurado también se anexa al system prompt (sin contraseña) para que el
+  gestor entienda "publica esto" en el chat. Web estática (index.html) = se
+  sube tal cual; con build npm = el gestor construye y sube dist/.
 
 ## Estado al guardar este archivo
 
+- **Publicación web (06/09/26)**: botón 🌐 Publicar en sesiones publicables
+  (index.html/package.json), destino único `PUBLISH_*` (por defecto
+  kiokao.com), auth por contraseña vía sshpass ($PUBLISH_PASSWORD en el
+  entorno de run_command, nunca en prompts). Ver la decisión "Publicación
+  web". Pendiente de probar E2E contra un servidor real.
 - **Bot de Matrix en producción (02/08/26)**: `@lsd-bot:whasap.duckdns.org`
   activo contra el Synapse de farnsworth; verificado E2E (autojoin selectivo,
   respuesta del gestor con tools, informe periódico a Matrix, usuario no

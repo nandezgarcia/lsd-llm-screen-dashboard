@@ -111,6 +111,23 @@ else
   command -v screen >/dev/null 2>&1 || { err "screen sigue sin estar disponible."; exit 1; }
 fi
 
+# --- sshpass (publicación web con contraseña; opcional pero recomendado) -----
+if command -v sshpass >/dev/null 2>&1; then
+  ok "sshpass $(sshpass -V 2>&1 | head -1 | grep -oE '[0-9.]+' | head -1)"
+else
+  warn "sshpass no encontrado (lo necesita el botón 🌐 Publicar; sin él, solo clave SSH)."
+  if confirm "¿Instalar sshpass?"; then
+    need_sudo
+    case "$PKG" in
+      apt)    $SUDO apt-get install -y sshpass ;;
+      dnf)    $SUDO dnf install -y sshpass ;;
+      pacman) $SUDO pacman -S --needed --noconfirm sshpass ;;
+      brew)   brew install hudochenkov/sshpass/sshpass ;;
+      *)      warn "Instala 'sshpass' a mano si vas a usar Publicar." ;;
+    esac
+  fi
+fi
+
 # --- Herramientas de compilación (node-pty es nativo) ----------------------
 build_tools_ok() { command -v make >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1 && { command -v g++ >/dev/null 2>&1 || command -v clang++ >/dev/null 2>&1; }; }
 
