@@ -161,6 +161,16 @@ input:disabled { opacity: 0.45; }
   padding: 2px 8px;
   font-size: 12px;
 }
+/* Botón "⬆ Subir" por sesión: empuja la pareja de botones a la derecha */
+.up-btn {
+  margin-left: auto;
+  background: transparent;
+  color: var(--text);
+  padding: 2px 8px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+#session-list .up-btn ~ .kill-btn { margin-left: 0; }
 .empty { color: var(--muted); font-size: 13px; padding: 6px 8px; }
 
 .output-header {
@@ -243,6 +253,16 @@ input:disabled { opacity: 0.45; }
   white-space: pre-wrap;
   word-break: break-word;
 }
+/* Formato mínimo de la vista Terminal del historial (hardcopy no trae color):
+   burbuja del usuario con el gris oscuro que usa el TUI en el terminal real
+   (el mismo remapeo que fixLightBlocks) y separador de turno atenuado */
+#history-content.term-view .hist-user {
+  background: #303030;
+  color: #e6e6e6;
+  border-radius: 3px;
+  padding: 0 4px;
+}
+#history-content.term-view .hist-sep { color: var(--muted); }
 
 /* Conversación (markdown desde wire.jsonl) */
 .conv-msg { margin: 6px 0; }
@@ -399,6 +419,82 @@ input:disabled { opacity: 0.45; }
 #discover-agents { background: var(--border); white-space: nowrap; }
 .config-actions { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
 .muted { color: var(--muted); font-size: 12px; }
+
+/* Despliegue SSH: editor de destinos en Configuración y modal de subida */
+.deploy-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.4fr 0.5fr 1.4fr auto auto auto;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.deploy-row input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 6px 8px;
+  font-size: 12px;
+  min-width: 0;
+}
+.deploy-row .deploy-test,
+.deploy-row .deploy-del { padding: 6px 8px; font-size: 12px; white-space: nowrap; }
+.deploy-test-result { font-size: 11px; color: var(--muted); }
+.deploy-test-result.ok { color: #6fdc8c; }
+.deploy-test-result.fail { color: #f07f7f; }
+.deploy-target-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.deploy-target-row select {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 7px 10px;
+  font-size: 13px;
+}
+#deploy-add { margin-bottom: 6px; }
+.deploy-fqdn-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  margin: 4px 0 10px;
+}
+.deploy-fqdn-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+  flex: 1;
+}
+.deploy-fqdn-row input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 7px 10px;
+  font-size: 13px;
+  min-width: 0;
+}
+.deploy-dot { font-size: 16px; color: var(--muted); padding-bottom: 6px; }
+
+/* Ventana emergente de progreso/resultado del despliegue */
+.deploy-run-dialog { width: min(720px, 92vw); }
+.deploy-run-log {
+  max-height: 62vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .msg {
   padding: 8px 11px;
   border-radius: 8px;
@@ -447,7 +543,7 @@ input:disabled { opacity: 0.45; }
 
 /* Explorador de directorios */
 #dir-picker-btn { background: var(--border); padding: 7px 10px; }
-#dir-modal, #analyze-modal, #confirm-modal, #config-modal, #archived-modal {
+#dir-modal, #analyze-modal, #confirm-modal, #config-modal, #archived-modal, #deploy-modal, #deploy-run-modal {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.55);
@@ -456,7 +552,7 @@ input:disabled { opacity: 0.45; }
   justify-content: center;
   z-index: 100;
 }
-#dir-modal.hidden, #analyze-modal.hidden, #confirm-modal.hidden, #config-modal.hidden, #archived-modal.hidden { display: none; }
+#dir-modal.hidden, #analyze-modal.hidden, #confirm-modal.hidden, #config-modal.hidden, #archived-modal.hidden, #deploy-modal.hidden, #deploy-run-modal.hidden { display: none; }
 .config-dialog { width: min(680px, 92vw); max-height: 85vh; overflow-y: auto; }
 .config-dialog .dir-header { font-size: 14px; font-weight: bold; color: var(--text); }
 #config-close { background: transparent; color: var(--danger); padding: 2px 8px; }

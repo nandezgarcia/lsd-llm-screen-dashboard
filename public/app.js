@@ -39,13 +39,16 @@ function detachTerminal() {
 }
 
 // ---------- Historial (overlay con pestañas) ----------
-// Pestaña Conversación: markdown íntegro desde el wire.jsonl de kimi.
-// Pestaña Terminal: scrollback crudo de screen (hardcopy -h).
+// Pestaña Conversación: markdown íntegro desde el wire.jsonl de kimi (la vista
+// rica, con colores). Pestaña Terminal: scrollback crudo de screen
+// (hardcopy -h) — GNU screen NO puede volcar color, es una limitación de
+// hardcopy (no hay equivalente a `tmux capture-pane -e`); por eso el default
+// es Conversación y Terminal queda como vista forense con formato mínimo.
 
 const historyOverlay = document.getElementById('history-overlay');
 const historyContent = document.getElementById('history-content');
 const historyName = document.getElementById('history-name');
-let historyMode = localStorage.getItem('hist-mode') || 'term'; // recuerda la última pestaña usada
+let historyMode = localStorage.getItem('hist-mode') || 'conv'; // recuerda la última pestaña usada
 
 function refitTerminal() {
   if (!term || !fitAddon) return;
@@ -78,10 +81,30 @@ function setHistoryMode(mode) {
 // empezó tu siguiente consulta. En la TUI en vivo no se puede inyectar nada
 // (kimi se dibuja a sí misma; los hooks de kimi no imprimen en pantalla).
 // El texto se traduce: por eso es función y no const (se evalúa al pintar).
-function turnSep() {
-  return '─'.repeat(18) + ' ' + t('history.turnSep') + ' ' + '─'.repeat(18);
+// El scrollback no tiene horas: el ts llega del historial archivado (capa C)
+// cruzando el texto de la burbuja con el del mensaje (ver loadHistory).
+function fmtTurnTs(ts) {
+  return new Date(ts).toLocaleString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
-function markTurns(text) {
+function turnSep(ts = null) {
+  const when = ts ? ` — ${fmtTurnTs(ts)}` : '';
+  return '─'.repeat(18) + ' ' + t('history.turnSep') + when + ' ' + '─'.repeat(18);
+}
+const normText = (s) => s.replace(/\s+/g, ' ').trim();
+
+// lookup texto de burbuja -> ts del mensaje archivado. Se comparan los
+// primeros 60 chars normalizados (la burbuja corta por ancho de terminal)
+function userTsLookup(messages) {
+  const map = new Map();
+  for (const m of messages || []) {
+    if (m.role !== 'user' || !m.ts) continue;
+    const key = normText(m.text).slice(0, 60);
+    if (key) map.set(key, m.ts);
+  }
+  return (line) => map.get(normText(line.replace(/^ ◆ {2}/, '')).slice(0, 60)) || null;
+}
+
+function markTurns(text, tsOf = () => null) {
   if (!text) return text;
   let first = true;
   return text
@@ -92,7 +115,26 @@ function markTurns(text) {
         first = false;
         return line;
       }
-      return `${turnSep()}\n${line}`;
+      return `${turnSep(tsOf(line))}\n${line}`;
+    })
+    .join('\n');
+}
+
+// Vista Terminal del historial: el hardcopy de screen es SOLO texto (sin
+// color posible), así que se le da un mínimo de formato al propio texto:
+// burbujas del usuario (◆) con el look oscuro del TUI y separadores de turno
+// atenuados. Todo el contenido se escapa antes de envolverlo.
+function renderTermHistory(text) {
+  if (!text) return '';
+  const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const sepText = t('history.turnSep');
+  return text
+    .split('\n')
+    .map((line) => {
+      const e = esc(line);
+      if (/^ ◆ {2}\S/.test(line)) return `<span class="hist-user">${e}</span>`;
+      if (line.includes(sepText)) return `<span class="hist-sep">${e}</span>`;
+      return e;
     })
     .join('\n');
 }
@@ -103,8 +145,15 @@ async function loadHistory() {
   historyContent.textContent = t('common.loading');
   if (historyMode === 'term') {
     try {
-      const { output } = await api(`/api/sessions/${encodeURIComponent(selected)}/history?lines=2000`);
-      historyContent.textContent = markTurns(output) || t('history.empty');
+      // El scrollback no tiene horas: se cruzan las burbujas del usuario con
+      // los mensajes archivados (que sí traen ts) para fechar cada separador
+      const [{ output }, conv] = await Promise.all([
+        api(`/api/sessions/${encodeURIComponent(selected)}/history?lines=2000`),
+        api(`/api/sessions/${encodeURIComponent(selected)}/conversation`).catch(() => ({ messages: [] })),
+      ]);
+      const marked = markTurns(output, userTsLookup(conv.messages));
+      if (marked) historyContent.innerHTML = renderTermHistory(marked);
+      else historyContent.textContent = t('history.empty');
     } catch (err) {
       historyContent.textContent = `${t('common.error')}: ${err.message}`;
     }
@@ -121,11 +170,7 @@ async function loadHistory() {
           if (!firstUser) {
             const sep = document.createElement('div');
             sep.className = 'turn-sep';
-            sep.textContent =
-              t('history.turnSep') +
-              (m.ts
-                ? ` — ${new Date(m.ts).toLocaleString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`
-                : '');
+            sep.textContent = t('history.turnSep') + (m.ts ? ` — ${fmtTurnTs(m.ts)}` : '');
             historyContent.appendChild(sep);
           }
           firstUser = false;
@@ -174,6 +219,10 @@ historyContent.addEventListener('mouseup', (e) => {
 window.addEventListener('keydown', (e) => {
   if (historyOverlay.classList.contains('hidden')) return;
   if (e.key === 'Escape') return closeHistory();
+  // Escribiendo en el chat/config o con un modal abierto encima: la tecla es
+  // para ese control, NO para la sesión (antes se colaba y se enviaba igual)
+  if (e.target.closest?.('input, textarea, [contenteditable]')) return;
+  if (document.querySelector('[id$="-modal"]:not(.hidden)')) return;
   // Empezar a escribir también vuelve al terminal (y la tecla no se pierde)
   const printable = e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey;
   if (printable || e.key === 'Enter') {
@@ -212,6 +261,48 @@ function attachTerminal(short, attempt = 0) {
   // Tildes: composición propia a nivel keydown (antes de xterm.js)
   term.attachCustomKeyEventHandler(deadKeyHandler);
 
+  // …y tragar el commit del IME: en Linux (IBus) la composición la cierra el
+  // sistema de entrada, no el navegador, y el carácter compuesto llega IGUAL al
+  // textarea oculto de xterm (compositionend/input) aunque el keydown se haya
+  // preventDefaulteado — sin este filtro, á salía duplicada (áá). Listeners en
+  // fase de captura = corren antes que los de xterm (bubble). Solo se traga el
+  // carácter exacto que acabamos de enviar nosotros, en una ventana corta; el
+  // tecleo normal (data distinta o fuera de ventana) no se toca.
+  const ta = term.textarea;
+  if (ta) {
+    // Seguimiento de si hay una composición IME activa (para no confundir los
+    // commits de composición real con los commits sueltos de teclas Process)
+    let compositionActive = false;
+    ta.addEventListener('compositionstart', () => { compositionActive = true; }, true);
+    ta.addEventListener('compositionend', () => { compositionActive = false; }, true);
+    const swallow = (ev) => {
+      if (!swallowIme.text || Date.now() > swallowIme.until) return;
+      const data = typeof ev.data === 'string' && ev.data ? ev.data : ta.value;
+      if (!data.includes(swallowIme.text)) return;
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+      ta.value = '';
+      swallowIme = { text: '', until: 0 };
+    };
+    ta.addEventListener('beforeinput', swallow, true);
+    ta.addEventListener('compositionend', swallow, true);
+    ta.addEventListener('input', swallow, true);
+    // Commit del IME con keydown 'Process' (01/09/26, la ñ en IBus): xterm
+    // cancela los keydown 'Process' (espera el ciclo compositionstart→
+    // compositionend) y el commit llega como beforeinput/input SUELTO — sin
+    // compositionstart y hasta con inputType 'insertText' — así que xterm lo
+    // descartaba y la ñ casi nunca llegaba. Regla: si acaba de llegar un
+    // keydown 'Process', el beforeinput que le sigue es ese commit; lo
+    // entregamos nosotros y cancelamos la inserción en el textarea.
+    ta.addEventListener('beforeinput', (ev) => {
+      if (compositionActive || !ev.data) return;
+      if (Date.now() - lastProcessKeyAt > 150) return;
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+      sendToSession(ev.data);
+    }, true);
+  }
+
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const url = `${proto}://${location.host}/ws?name=${encodeURIComponent(short)}` +
     `&cols=${term.cols}&rows=${term.rows}`;
@@ -235,7 +326,19 @@ function attachTerminal(short, attempt = 0) {
       outputTitle.textContent = t('terminal.disconnected', { name: short });
     }
   };
-  term.onData((data) => sendToSession(data));
+  // Red de seguridad anti-duplicado de tildes a nivel de DATOS: cubre cualquier
+  // camino interno de xterm por el que el commit del IME pueda colarse. Si
+  // xterm emite exactamente el carácter que acabamos de componer nosotros
+  // (mismo texto, dentro de la ventana), es el duplicado: no reenviarlo.
+  // Un tecleo legítimo del mismo carácter exige volver a pulsar la tecla muerta
+  // antes, así que no puede colisionar dentro de la ventana.
+  term.onData((data) => {
+    if (swallowIme.text && Date.now() <= swallowIme.until && data === swallowIme.text) {
+      swallowIme = { text: '', until: 0 };
+      return;
+    }
+    sendToSession(data);
+  });
 
   outputTitle.textContent = t('terminal.titleWith', { name: short });
 }
@@ -315,12 +418,37 @@ configModal.onclick = (e) => {
 // Teclas muertas (tildes): componemos NOSOTROS a nivel keydown, antes de que
 // xterm.js o el navegador toquen la tecla (preventDefault). El enfoque anterior
 // (componer sobre el flujo de datos) perdía vocales cuando el navegador tragaba
-// la composición: "Cómo" llegaba como "C´mo". Solo ´ y ¨: ` ~ ^ no se tocan
-// porque son caracteres de uso normal en un terminal (~ = home).
-const DEAD_ACUTE = { a: 'á', e: 'é', i: 'í', o: 'ó', u: 'ú', A: 'Á', E: 'É', I: 'Í', O: 'Ó', U: 'Ú' };
-const DEAD_UMLAUT = { u: 'ü', U: 'Ü' };
-const DEAD_MAPS = { '´': DEAD_ACUTE, '¨': DEAD_UMLAUT };
+// la composición: "Cómo" llegaba como "C´mo".
+// Qué acento es: key 'Dead' no lo dice, así que se deduce de ev.code + Shift.
+// Cubre teclado ES (´/¨ junto a la Ñ en Quote, `/^ junto a la P en
+// BracketLeft) y US-International ('/" en Quote, `/~ en Backquote, ^ en
+// Shift+6) — en US-Intl la Ñ se escribe ~+n, de ahí el mapeo de ~.
+// Algunos sistemas reportan el carácter directamente en vez de 'Dead'; solo se
+// interceptan ´ y ¨ directos (` ~ ^ NO: en layouts donde no son muertas son
+// caracteres normales de terminal — ~ = home).
+// La composición es genérica por normalización Unicode (base + marca
+// combinante → NFC): vale para á, ñ, ü, â, à, ã… y lo no componible se suelta
+// (´+m → ´m, ~+espacio → ~).
+const DEAD_BY_CODE = {          // [sin Shift, con Shift]
+  Quote: ['´', '¨'],            // ES: ´/¨ (junto a Ñ) · US-Intl: '/"
+  BracketLeft: ['`', '^'],      // ES: `/^ (junto a P)
+  Backquote: ['`', '~'],        // US-Intl: `/~
+  Digit6: [null, '^'],          // US-Intl: ^
+};
+const COMBINING = { '´': 0x301, '¨': 0x308, '`': 0x300, '~': 0x303, '^': 0x302 };
+const composeDead = (base, dead) => {
+  const c = (base + String.fromCharCode(COMBINING[dead])).normalize('NFC');
+  return c.length === 1 ? c : null; // no componible: null
+};
 let pendingDead = '';
+// Carácter que acabamos de enviar nosotros por composición manual: el IME
+// (IBus en Linux) confirma su propia copia en el textarea oculto de xterm a
+// pesar del preventDefault del keydown — sin tragar ese commit, sale
+// duplicada (áá). Los listeners que lo cazan están en attachTerminal.
+let swallowIme = { text: '', until: 0 };
+// Último keydown 'Process' (tecla entregada vía IME, p. ej. la ñ en IBus): lo
+// usan los listeners del textarea para entregar el commit que xterm descarta
+let lastProcessKeyAt = 0;
 
 function deadKeyHandler(ev) {
   if (ev.type !== 'keydown') return true;
@@ -333,11 +461,13 @@ function deadKeyHandler(ev) {
     sendToSession('\x13');
     return false;
   }
+  if (ev.key === 'Process') lastProcessKeyAt = Date.now();
   const plain = !ev.ctrlKey && !ev.altKey && !ev.metaKey;
-  // key 'Dead' no dice qué acento es: en teclado español, ´ sin Shift y ¨ con Shift
   let dead = '';
-  if (plain && ev.key === 'Dead') dead = ev.shiftKey ? '¨' : '´';
-  else if (plain && (ev.key === '´' || ev.key === '¨')) dead = ev.key;
+  if (plain && ev.key === 'Dead') {
+    const byCode = DEAD_BY_CODE[ev.code];
+    dead = (byCode && byCode[ev.shiftKey ? 1 : 0]) || (ev.shiftKey ? '¨' : '´');
+  } else if (plain && (ev.key === '´' || ev.key === '¨')) dead = ev.key;
   if (dead) {
     ev.preventDefault();
     if (pendingDead) sendToSession(pendingDead); // dos acentos seguidos: suelta el primero
@@ -345,11 +475,31 @@ function deadKeyHandler(ev) {
     return false;
   }
   if (!pendingDead) return true;
-  const composed = ev.key && ev.key.length === 1 ? DEAD_MAPS[pendingDead][ev.key] : null;
+  // El IME (IBus) está componiendo él mismo: durante una composición activa los
+  // keydown llegan como 'Process' y el carácter final lo entrega el commit
+  // (compositionend/input) por su propio camino. No componer nosotros NI soltar
+  // el acento: dejar pasar y que el commit entregue el carácter una sola vez.
+  if (ev.key === 'Process') {
+    pendingDead = '';
+    return true;
+  }
+  // Firefox compone ya en el keydown (la vocal llega como ev.key = 'á'): si la
+  // tecla YA es la composición del acento pendiente, dejarla pasar tal cual —
+  // enviar algo aquí duplicaría o soltaría un acento suelto de más
+  if (ev.key && ev.key.length === 1) {
+    const nfd = ev.key.normalize('NFD');
+    const mark = String.fromCharCode(COMBINING[pendingDead]);
+    if (nfd.length === 2 && nfd[1] === mark) {
+      pendingDead = '';
+      return true;
+    }
+  }
+  const composed = ev.key && ev.key.length === 1 ? composeDead(ev.key, pendingDead) : null;
   const d = pendingDead;
   pendingDead = '';
   if (composed && plain) {
     ev.preventDefault();
+    swallowIme = { text: composed, until: Date.now() + 1500 };
     sendToSession(composed);
     return false;
   }
@@ -488,7 +638,7 @@ function renderArchived(archived) {
     const date = document.createElement('span');
     date.className = 'badge saved';
     const d = new Date(a.contextSavedAt || a.updatedAt);
-    date.textContent = `💾 ${d.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' })} ${d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}`;
+    date.textContent = `💾 ${d.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: '2-digit' })} ${d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}`;
     date.title = t('sessions.lastContextSaved');
     const reopen = document.createElement('button');
     reopen.className = 'mini-btn';
@@ -573,6 +723,13 @@ async function refreshSessions() {
     const { sessions, archived } = await api('/api/sessions');
     renderArchived(archived || []);
     const managed = sessions.filter((s) => s.managed);
+    // Orden: primero la última sesión con la que interactuaste. Señal =
+    // lastMsgAt (mtime del wire.jsonl, que kimi actualiza al enviar tu
+    // mensaje); sin ella, contextSavedAt; sin fecha, al final. sort es
+    // estable: a igualdad de fecha se conserva el orden de screen -ls.
+    managed.sort((a, b) =>
+      (b.lastMsgAt || b.contextSavedAt || '').localeCompare(a.lastMsgAt || a.contextSavedAt || '')
+    );
     lastManaged = managed.map((s) => ({
       name: s.name.slice('kimi-'.length),
       label: s.label,
@@ -610,10 +767,21 @@ async function refreshSessions() {
         const saved = document.createElement('span');
         saved.className = 'badge saved';
         const d = new Date(s.contextSavedAt);
-        saved.textContent = `💾 ${d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}`;
+        const day = d.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: '2-digit' });
+        const time = d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+        saved.textContent = `💾 ${day} ${time}`;
         saved.title = t('sessions.contextSavedTitle', { date: d.toLocaleString('es-ES') });
         li.appendChild(saved);
       }
+      const up = document.createElement('button');
+      up.className = 'up-btn';
+      up.textContent = t('deploy.btn');
+      up.title = t('sessions.uploadTitle');
+      up.onclick = (e) => {
+        e.stopPropagation();
+        openDeployModal(short, display);
+      };
+      li.append(up);
       const kill = document.createElement('button');
       kill.className = 'kill-btn';
       kill.textContent = '📦';
@@ -853,7 +1021,7 @@ function addMsg(text, cls) {
 }
 
 // Registro de herramientas plegable: el JSON queda disponible pero no ensucia el chat
-function addToolLog(t) {
+function toolLogEl(t) {
   const det = document.createElement('details');
   det.className = 'msg tool';
   const sum = document.createElement('summary');
@@ -861,7 +1029,11 @@ function addToolLog(t) {
   const body = document.createElement('pre');
   body.textContent = JSON.stringify(t.result, null, 1);
   det.append(sum, body);
-  chatLog.appendChild(det);
+  return det;
+}
+
+function addToolLog(t) {
+  chatLog.appendChild(toolLogEl(t));
   chatLog.scrollTop = chatLog.scrollHeight;
 }
 
@@ -967,6 +1139,8 @@ async function loadConfig() {
     );
     cfgKeyHint.textContent = c.apiKeySet ? t('config.keyHintSet', { hint: c.apiKeyHint }) : t('config.keyHintUnset');
     cfgFields.reportIntervalMin.value = c.reportIntervalMin ?? 0;
+    deployTargetsEl.innerHTML = '';
+    for (const tg of c.deployTargets || []) addDeployTargetRow(tg);
     syncSessionUrlState();
     fillCreateAgentOptions();
     updateSessionWarning();
@@ -980,6 +1154,9 @@ document.getElementById('config-form').onsubmit = async (e) => {
   const body = {};
   for (const [k, el] of Object.entries(cfgFields)) body[k] = el.value.trim();
   body.sessionCli = cfgSessionCli.value;
+  // Destinos de despliegue: array serializado (vacío = sin destinos, CLEARABLE)
+  const targets = collectDeployTargets();
+  body.deployTargets = targets.length ? JSON.stringify(targets) : '';
   try {
     const { changed } = await api('/api/config', {
       method: 'POST',
@@ -993,6 +1170,193 @@ document.getElementById('config-form').onsubmit = async (e) => {
     loadConfig();
   } catch (err) {
     cfgStatus.textContent = `${t('common.error')}: ${err.message}`;
+  }
+};
+
+// ---------- Despliegue SSH (destinos en Config + botón ⬆ en sesiones) ----------
+// Quién despliega: el AGENTE de la sesión por SSH, orquestado por el gestor.
+// Aquí se editan los destinos (DEPLOY_TARGETS, JSON en .env vía /api/config),
+// se prueba la conexión y se arranca el despliegue con /api/sessions/:name/deploy.
+
+const deployTargetsEl = document.getElementById('deploy-targets');
+const deployModal = document.getElementById('deploy-modal');
+const deployText = document.getElementById('deploy-text');
+const deployTargetSelect = document.getElementById('deploy-target-select');
+let deployPending = null; // { slug, display } de la sesión a subir
+
+// Una fila del editor de destinos: nombre/usuario/host/puerto/ruta + Probar + 🗑
+function addDeployTargetRow(tg = {}) {
+  const row = document.createElement('div');
+  row.className = 'deploy-row';
+  const inputs = {};
+  for (const [cls, val, ph] of [
+    ['name', tg.name || '', t('deploy.namePh')],
+    ['user', tg.user || '', t('deploy.userPh')],
+    ['host', tg.host || '', t('deploy.hostPh')],
+    ['port', tg.port ?? '', t('deploy.portPh')],
+    ['path', tg.basePath || '', t('deploy.pathPh')],
+  ]) {
+    const i = document.createElement('input');
+    i.className = `deploy-f-${cls}`;
+    i.placeholder = ph;
+    i.value = val;
+    inputs[cls] = i;
+    row.appendChild(i);
+  }
+  const test = document.createElement('button');
+  test.type = 'button';
+  test.className = 'btn-secondary deploy-test';
+  test.textContent = t('deploy.test');
+  test.title = t('deploy.testTitle');
+  const result = document.createElement('span');
+  result.className = 'deploy-test-result';
+  test.onclick = async () => {
+    test.disabled = true;
+    result.className = 'deploy-test-result';
+    result.textContent = t('deploy.testing');
+    try {
+      const r = await api('/api/deploy/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: inputs.name.value.trim(),
+          user: inputs.user.value.trim(),
+          host: inputs.host.value.trim(),
+          port: Number(inputs.port.value) || 22,
+          basePath: inputs.path.value.trim() || '/',
+        }),
+      });
+      if (r.ok) {
+        result.textContent = t('deploy.testOk');
+        result.classList.add('ok');
+      } else {
+        result.textContent = `${t('deploy.testFail')} ${r.error || ''}` + (r.hint ? ` — ${r.hint}` : '');
+        result.classList.add('fail');
+      }
+    } catch (err) {
+      result.textContent = `${t('deploy.testFail')} ${err.message}`;
+      result.classList.add('fail');
+    } finally {
+      test.disabled = false;
+    }
+  };
+  const del = document.createElement('button');
+  del.type = 'button';
+  del.className = 'btn-secondary deploy-del';
+  del.textContent = '🗑';
+  del.title = t('deploy.removeTitle');
+  del.onclick = () => row.remove();
+  row.append(test, result, del);
+  deployTargetsEl.appendChild(row);
+  return row;
+}
+
+// Filas → array para DEPLOY_TARGETS (solo filas con lo mínimo: nombre+user+host)
+function collectDeployTargets() {
+  const out = [];
+  for (const row of deployTargetsEl.querySelectorAll('.deploy-row')) {
+    const v = (cls) => row.querySelector(`.deploy-f-${cls}`).value.trim();
+    if (!v('name') || !v('user') || !v('host')) continue;
+    out.push({
+      name: v('name'),
+      user: v('user'),
+      host: v('host'),
+      port: Number(v('port')) || 22,
+      basePath: v('path') || '/',
+    });
+  }
+  return out;
+}
+
+document.getElementById('deploy-add').onclick = () => addDeployTargetRow();
+
+// Modal de despliegue: elegir destino + subdominio/dominio y arrancar.
+// El GESTOR ejecuta el despliegue completo con run_command (rsync, deps,
+// systemd endurecido, nginx, SSL certbot) — puede tardar minutos.
+const deploySubdomain = document.getElementById('deploy-subdomain');
+const deployDomain = document.getElementById('deploy-domain');
+
+function openDeployModal(slug, display) {
+  const targets = configCache?.deployTargets || [];
+  if (!targets.length) {
+    askConfirm(t('deploy.noTargets'), { title: t('deploy.modalTitle'), no: null });
+    return;
+  }
+  deployPending = { slug, display };
+  deployText.textContent = t('deploy.modalText', { name: display });
+  deployTargetSelect.innerHTML = '';
+  for (const tg of targets) {
+    const opt = document.createElement('option');
+    opt.value = tg.name;
+    opt.textContent = `${tg.name} (${tg.user}@${tg.host}:${tg.port} ${tg.basePath})`;
+    deployTargetSelect.appendChild(opt);
+  }
+  // subdominio = slug de la sesión; dominio = el último usado (se recuerda)
+  deploySubdomain.value = slug;
+  deployDomain.value = localStorage.getItem('lsd-deploy-domain') || '';
+  deployModal.classList.remove('hidden');
+}
+
+document.getElementById('deploy-cancel').onclick = () => deployModal.classList.add('hidden');
+deployModal.onclick = (e) => { if (e.target === deployModal) deployModal.classList.add('hidden'); };
+
+// Ventana emergente de progreso/resultado del despliegue (no el chat principal)
+const deployRunModal = document.getElementById('deploy-run-modal');
+const deployRunTitle = document.getElementById('deploy-run-title');
+const deployRunLog = document.getElementById('deploy-run-log');
+document.getElementById('deploy-run-close').onclick = () => deployRunModal.classList.add('hidden');
+// mientras corre NO se cierra con clic fuera (un deploy tarda minutos); con el
+// resultado a la vista, sí
+deployRunModal.onclick = (e) => {
+  if (e.target === deployRunModal && !deployRunLog.dataset.running) deployRunModal.classList.add('hidden');
+};
+
+document.getElementById('deploy-go').onclick = async () => {
+  const sess = deployPending;
+  const target = deployTargetSelect.value;
+  const subdomain = deploySubdomain.value.trim().toLowerCase();
+  const domain = deployDomain.value.trim().toLowerCase();
+  if (!sess || !target) return;
+  if (!subdomain || !domain) {
+    deployText.textContent = t('deploy.needFqdn');
+    return;
+  }
+  deployModal.classList.add('hidden');
+  localStorage.setItem('lsd-deploy-domain', domain);
+  const fqdn = `${subdomain}.${domain}`;
+  deployRunTitle.textContent = t('deploy.runTitle', { name: sess.display, fqdn });
+  deployRunLog.innerHTML = '';
+  deployRunLog.dataset.running = '1';
+  const spin = document.createElement('p');
+  spin.className = 'muted';
+  spin.textContent = t('deploy.working');
+  deployRunLog.appendChild(spin);
+  deployRunModal.classList.remove('hidden');
+  try {
+    const result = await api(`/api/sessions/${encodeURIComponent(sess.slug)}/deploy`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target, subdomain, domain }),
+    });
+    spin.remove();
+    for (const tl of result.toolLog || []) deployRunLog.appendChild(toolLogEl(tl));
+    const reply = document.createElement('div');
+    reply.className = 'msg assistant md';
+    reply.innerHTML = renderMarkdown(result.reply || t('chat.noReply'));
+    deployRunLog.appendChild(reply);
+    // el gestor conserva el despliegue en contexto para próximos turnos
+    // (silencioso: no se muestra en el chat principal)
+    chatHistory.push(...result.messages);
+    refreshSessions();
+  } catch (err) {
+    spin.remove();
+    const errEl = document.createElement('div');
+    errEl.className = 'msg error';
+    errEl.textContent = `${t('common.error')}: ${err.message}`;
+    deployRunLog.appendChild(errEl);
+  } finally {
+    delete deployRunLog.dataset.running;
+    deployRunLog.scrollTop = deployRunLog.scrollHeight;
   }
 };
 

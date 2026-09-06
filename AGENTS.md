@@ -164,6 +164,14 @@ la línea de comandos del propio shell y se automata). Buscar el PID por puerto:
   el terminal abre ese overlay a pantalla completa (se probó panel dividido y al
   usuario no le gustó). La cabecera indica que es solo lectura y se sale con
   Volver/Esc. No reintroducir el envío de flechas.
+  **Hardcopy = sin color (01/09/26)**: GNU screen no puede volcar atributos ANSI
+  (no hay equivalente a `tmux capture-pane -e`), así que la pestaña Terminal es
+  necesariamente texto con formato mínimo (`renderTermHistory()`: burbujas ◆
+  con el gris oscuro del TUI y separadores atenuados). Por eso la rueda abre
+  por defecto la pestaña **Conversación** (`hist-mode` default `conv`), que sí
+  es la vista rica (markdown desde wire.jsonl); Terminal queda como forense.
+  Además, con el overlay abierto ya NO se reenvían teclas a la sesión si el
+  foco está en un input/textarea o hay un modal abierto (antes se colaban).
   El WS del terminal se reconecta solo (5 intentos, 2 s) si cae por segundo plano
   o suspensión; al volver el foco (`visibilitychange`/`focus`) se refrescan las
   sesiones y se reconecta si hace falta; re-clicar la sesión seleccionada con el
@@ -215,6 +223,17 @@ la línea de comandos del propio shell y se automata). Buscar el PID por puerto:
   avisa con `noteAttach()` y el monitor ignora cambios durante 5 s (solo actualiza el
   baseline). Efecto aceptado: teclear justo tras cambiar de sesión no marca
   "Trabajando" hasta pasada la gracia. No quitar sin alternativa.
+- **Falso "Esperando" (06/08/26)**: el diff de pantalla SOLO no basta — mientras el
+  LLM piensa (llamada a la API sin streaming visible) la pantalla puede quedarse
+  estática 20+ s a mitad de turno. El monitor suma dos señales sobre el ÁRBOL de
+  procesos de la sesión (hijos del screen server): RED (alguna TCP ESTABLISHED a
+  dirección NO local = llamada a la API en vuelo; medido: 0 en reposo, 1-2 en turno,
+  keep-alive ~5 s de cola) y CPU (utime+stime del árbol con umbral 10 jiffies/tick:
+  en reposo ~1 jiffy/4 s de ruido, trabajando 150-500). Las conexiones locales se
+  excluyen: un dev server (streamlit con su websocket, p. ej.) fijaría la sesión en
+  "trabajando" mientras alguien la tuviera abierta en el navegador. Limitación
+  conocida y aceptada: una ÚNICA tool call local larga y silenciosa sin CPU (p. ej.
+  esperar a un daemon local) puede seguir marcando "esperando".
 - **contextSavedAt**: al pasar a `esperando`, el monitor guarda el mtime del
   `wire.jsonl` de kimi (vía `session_index.jsonl` por workDir) — es la marca honesta
   de cuándo persistió kimi el contexto; se muestra como badge 💾 en la lista.
@@ -226,6 +245,12 @@ la línea de comandos del propio shell y se automata). Buscar el PID por puerto:
   mensaje user. En la TUI EN VIVO no se puede inyectar nada (kimi se dibuja a
   sí misma; los hooks de kimi —evento `Stop`— escriben al contexto, no a
   pantalla; comprobado en la doc oficial).
+  **Con fecha y hora (09/08/26)**: el separador muestra `✂ tu consulta —
+  dd/mm/aaaa, HH:MM`. El scrollback NO tiene horas: en la vista Terminal se
+  cruzan las burbujas con los mensajes del historial archivado (que sí traen
+  ts) comparando los primeros 60 chars normalizados (`userTsLookup()`); si no
+  hay archivo (o no casa), el separador sale sin fecha. La vista Conversación
+  usa el ts del propio mensaje. Formato compartido en `fmtTurnTs()`.
 - **Bloques blancos invisibles (burbuja del usuario, vallas de código)**: la TUI de
   kimi pinta esos bloques con bg blanco (SGR 47/107/48;5;7/15/truecolor) y texto con
   el fg POR DEFECTO — blanco en xterm.js → blanco sobre blanco, invisible hasta
@@ -236,12 +261,37 @@ la línea de comandos del propio shell y se automata). Buscar el PID por puerto:
   de buffer xterm (p15→p236) y con captura.
 - **Teclas muertas (tildes)**: el frontend compone a nivel **keydown** con
   `preventDefault` en `deadKeyHandler()` (`app.js`, vía `attachCustomKeyEventHandler`),
-  ANTES de que xterm.js o el navegador toquen la tecla: ´/¨ quedan pendientes y se
-  componen con la siguiente vocal (´+o→ó, ¨+u→ü) o se sueltan si no es componible
-  (´+m→´m). key `Dead` no dice qué acento es: en teclado ES, ´ sin Shift y ¨ con
-  Shift. Solo ´ y ¨ (` ~ ^ no se tocan: son caracteres normales de terminal).
+  ANTES de que xterm.js o el navegador toquen la tecla: el acento queda
+  pendiente y se compone con la siguiente letra (´+o→ó, ~+n→ñ) o se suelta si
+  no es componible (´+m→´m, ~+espacio→~). key `Dead` no dice qué acento es:
+  se deduce de `ev.code`+Shift (`DEAD_BY_CODE`: cubre teclado ES — ´/¨ en
+  Quote, `/^ en BracketLeft — y US-International — '/" en Quote, `/~ en
+  Backquote, ^ en Shift+6; en US-Intl la ñ es ~+n). La composición es genérica
+  por normalización Unicode (letra + marca combinante → NFC, `composeDead()`):
+  vale á, ñ, ü, â, à, ã… Solo se interceptan como caracteres directos ´ y ¨
+  (` ~ ^ NO: en layouts donde no son muertas son caracteres de terminal).
   El enfoque anterior (componer en el flujo de datos con `fixDeadKeys()`) perdía
   vocales cuando el navegador tragaba la composición ("Cómo" llegaba "C´mo").
+  **Duplicada por el IME (01/09/26, á→áá)**: en Linux (IBus) la composición la
+  cierra el sistema de entrada y el carácter llega IGUAL al textarea oculto de
+  xterm vía `compositionend`/`input` aunque el keydown se preventDefaultee — la
+  nuestra por `sendToSession` + la del IME = duplicada. Fix: al enviar un
+  compuesto se arma `swallowIme` y listeners en CAPTURA sobre `term.textarea`
+  (`beforeinput`/`compositionend`/`input`, en `attachTerminal`) cancelan el
+  commit si el texto coincide dentro de una ventana de 1,5 s; como red de
+  seguridad, `term.onData` también descarta un dato idéntico dentro de la
+  ventana. Además Firefox compone ya en el keydown (`ev.key='á'`): se detecta
+  por NFD y se deja pasar sin enviar nada.
+  **ñ perdida (01/09/26)**: IBus entrega la ñ como keydown `Process` (code
+  Semicolon) + commit SUELTO por `beforeinput`/`input` (sin `compositionstart`
+  y hasta con inputType `insertText`). xterm cancela los keydown `Process`
+  (espera el ciclo de composición) y luego descarta ese commit huérfano → la ñ
+  casi nunca llegaba. Fix: se registra `lastProcessKeyAt` en el handler y, si
+  un `beforeinput` con datos llega <150 ms después sin composición activa, lo
+  entregamos nosotros con `sendToSession` y cancelamos la inserción. Ojo: IBus
+  a veces manda TAMBIÉN teclas normales como `Process` duplicado (observado
+  con KeyA/Backspace/Enter) — no entregar nada ante un `Process` sin
+  `beforeinput` asociado.
 - **Directorio con contenido**: `POST /api/sessions` devuelve `hasContent`; si es
   true, el frontend ofrece (modal propio, no `confirm()`) que el gestor analice el
   proyecto vía chat para dar contexto a la sesión. El explorador 📁 usa
@@ -304,6 +354,40 @@ la línea de comandos del propio shell y se automata). Buscar el PID por puerto:
   duckdns NO expone `/_synapse/admin` y en ese Synapse la desactivación de
   usuarios es el endpoint v1 `/_synapse/admin/v1/deactivate/<mxid>` (el v2
   `users/<mxid>/deactivate` devuelve M_UNRECOGNIZED).
+- **Despliegue SSH (23/08/26, botón "⬆ Subir")**: cada sesión activa tiene un
+  botón etiquetado ⬆ Subir que despliega su proyecto a un servidor. **Quién
+  despliega es el GESTOR (Deepseek) ejecutándolo todo él mismo** con la tool
+  `run_command` (shell local bash como el usuario del dashboard: ssh/rsync al
+  destino, inspección del workdir, curl de verificación): rsync del proyecto
+  (sin .venv/node_modules/.git ni .env), deps en remoto, servicio systemd
+  endurecido (NoNewPrivileges/PrivateTmp/ProtectSystem=strict+ReadWritePaths),
+  virtualhost nginx y SSL con certbot --nginx. NO delega en el agente de la
+  sesión (primera versión sí lo hacía; el usuario lo cambió: "tiene que
+  hacerlo el gestor"). El modal de subida pide destino + **subdominio +
+  dominio** (FQDN = sub.domain; subdominio por defecto = slug, dominio
+  recordado en localStorage `lsd-deploy-domain`); la ruta remota es
+  `<basePath>/<fqdn>`. Destinos: `DEPLOY_TARGETS` (JSON array
+  `[{name,user,host,port,basePath}]`, saneado por `parseDeployTargets()` en
+  config.js — esos valores acaban como args de ssh vía execFile SIN shell),
+  editable en ⚙ → "Despliegue SSH" (hot-apply, CLEARABLE). Auth = claves
+  `~/.ssh` del usuario (la web NUNCA toca claves privadas; requisito
+  `ssh-copy-id` previo, lo verifica el botón Probar → `POST /api/deploy/test`
+  con BatchMode). `POST /api/sessions/:name/deploy {target, subdomain,
+  domain}` valida sub/domain con regex, construye el prompt EN EL SERVIDOR y
+  corre `runManagerChat` con **maxIterations=25** (un deploy completo con
+  certbot tarda minutos; la petición HTTP dura lo que tarde). El progreso y el
+  resultado se muestran en una **ventana emergente propia**
+  (`#deploy-run-modal`: toolLog plegable + resumen en markdown; mientras corre
+  no se cierra con clic fuera), NO en el chat principal — aunque el intercambio
+  sí se añade en silencio a `chatHistory` para que el gestor lo tenga en
+  contexto. Requiere solo
+  que la sesión tenga workdir en el registry (no hace falta que esté viva).
+  Los destinos configurados se anexan al system prompt en `runManagerChat`
+  (como activeSession). OJO DE SEGURIDAD: `run_command` es shell completa del
+  usuario en manos del LLM gestor — con la web sin auth y en 0.0.0.0 es RCE
+  directo; cerrado a propósito SOLO si HOST=127.0.0.1 o proxy con auth.
+  Ojo: kimi nuevo en una carpeta pide "Trust this folder" y bloquea el
+  arranque hasta contestar.
 
 ## Estado al guardar este archivo
 
@@ -319,6 +403,17 @@ la línea de comandos del propio shell y se automata). Buscar el PID por puerto:
   título, package.json (`lsd-llm-screen-dashboard`), log de arranque. La CARPETA
   del proyecto sigue siendo `llm-screen-dashboard` a propósito (kimi indexa por
   ruta; no renombrarla nunca).
+- **Despliegue SSH en producción (23/08/26)**: botón "⬆ Subir" por sesión +
+  editor de destinos en ⚙ (ver la decisión "Despliegue SSH"). El gestor lo
+  ejecuta TODO con la tool `run_command` (nueva en deepseek.js); el modal pide
+  destino + subdominio + dominio. Destinos configurados en `.env`:
+  `farnsworth` (andres@10.13.0.1, base `/var/www`) y `farnsworth-tmp` (base
+  `/tmp`, para pruebas). Verificado E2E (23/08/26): el gestor desplegó SOLO
+  `lsd-test.kiokao.com` en farnsworth con 19 run_command (rsync a
+  `/var/www/<fqdn>`, vhost nginx, certbot con redirect, https 200 verificado
+  desde fuera) y acertó al NO crear systemd para un proyecto estático;
+  limpiado tras la prueba (vhost, cert y carpeta borrados). Nota de UI: claves
+  i18n ahora 157 ×6 idiomas (el dato "124" de la sección i18n quedó viejo).
 - **Ciclo de vida verificado end-to-end**: crear ("ciclo vida" → slug `ciclo-vida`)
   → archivar → aparece en Archivadas → reabrir (kimi reanudó con `-c`) → eliminar
   con `deleteWorkdir=1` (carpeta borrada, registro limpio). Guardar historial (⬇)
@@ -362,6 +457,13 @@ la línea de comandos del propio shell y se automata). Buscar el PID por puerto:
   datos fue reemplazado el 22/07/26).
 - **Estados**: badges Trabajando / Esperando respuesta usuario + 💾 contextSavedAt
   (mtime del wire.jsonl); ventana de gracia 5 s tras attach/detach del dashboard.
+  **Orden de la lista (01/09/26)**: las activas se ordenan por `lastMsgAt`
+  (mtime del wire.jsonl medido por el monitor en CADA tick, no solo en la
+  transición a esperando como `contextSavedAt`) descendente — primero la
+  última sesión con la que el usuario interactuó (su mensaje se persiste en el
+  wire al enviarlo); caída a `contextSavedAt` y, sin fecha, al final (sort
+  estable: conserva el orden de `screen -ls`). Sesiones no-kimi quedan sin
+  `lastMsgAt` (null no pisa el último valor conocido).
 - **Layout (23/07/26)**: panel izquierdo = SOLO el terminal activo (`#terminal-panel`,
   con la barra `#term-keys` y el header de acciones); columna derecha = panel
   Sesiones (`#sessions-panel`: form de crear + lista de activas) arriba y
@@ -440,8 +542,9 @@ la línea de comandos del propio shell y se automata). Buscar el PID por puerto:
   pushear: `gh auth switch --user nandezgarcia`, push, y restaurar).
 - **Instaladores (25/07/26)**: `install.sh` (Linux/macOS/WSL2) e `install.ps1`
   (Windows vía WSL2) — ver sección Arranque. Bind configurable con `HOST` en
-  `.env` (cierra el pendiente del bind a 127.0.0.1; el `.env` de ESTA máquina
-  no tiene HOST, así que aquí sigue escuchando en 0.0.0.0 hasta definirlo).
+  `.env` (el `.env` de ESTA máquina ya tiene `HOST=127.0.0.1` desde el
+  23/08/26: escucha solo en local — importante ahora que el gestor tiene
+  `run_command`, una shell completa).
 - **Despliegue en servidor (25/07/26)**: instancia en `andres@10.13.0.1:~/llm-screen-dashboard`
   vía install.sh, servicio systemd `lsd.service`, `HOST=10.13.0.1` (solo VPN
   10.13.0.0/24; ufw regla 6 ya la permite entera, no hubo que añadir nada).

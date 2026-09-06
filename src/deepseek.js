@@ -20,6 +20,7 @@ Reglas:
 - No crees ni cierres sesiones salvo que el usuario lo pida explícitamente.
 - Las sesiones tienen un nombre id (slug sin espacios, p.ej. 'analisis-seguridad') y pueden tener una etiqueta legible con espacios. Al crear, puedes pasar nombres con espacios (el sistema genera el slug); el resto de herramientas usan siempre el nombre id que devuelve list_sessions.
 - Puedes descubrir qué CLIs de agente hay instalados en el sistema con discover_agents (tú decides qué candidatos comprobar: kimi, claude, codex, gemini, aider, opencode…). Las sesiones nuevas se lanzan con el CLI que el usuario tenga configurado en el panel de Configuración.
+- run_command ejecuta un comando en la shell LOCAL (bash) como el usuario del dashboard: es tu herramienta para los DESPLIEGUES (ssh/rsync/scp a los destinos configurados, inspeccionar el workdir de un proyecto, curl de verificación…). Úsala con cabeza: comandos concretos y acotados, nada destructivo fuera del objetivo del despliegue, y en remoto solo dentro de la ruta base del destino.
 - Cuando ejecutes acciones, resume al usuario qué hiciste y qué observaste.`;
 
 const TOOLS = [
@@ -35,7 +36,7 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'create_session',
-      description: 'Crea una nueva sesión screen ejecutando kimi con Deepseek como modelo. El directorio de trabajo por defecto es workspaces/<nombre>.',
+      description: 'Crea una nueva sesión screen con el CLI de agente configurado (kimi, claude…). El directorio de trabajo por defecto es workspaces/<nombre>.',
       parameters: {
         type: 'object',
         properties: {
@@ -101,6 +102,21 @@ const TOOLS = [
         type: 'object',
         properties: { name: { type: 'string' } },
         required: ['name'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'run_command',
+      description: 'Ejecuta un comando en la shell local (bash) como el usuario del dashboard. Es la herramienta de los DESPLIEGUES: ssh/rsync/scp a los destinos configurados, inspeccionar el workdir de un proyecto, curl de verificación. Devuelve la salida (stdout+stderr, recortada) y el código de salida.',
+      parameters: {
+        type: 'object',
+        properties: {
+          command: { type: 'string', description: 'Comando a ejecutar (bash -lc).' },
+          timeout: { type: 'number', description: 'Segundos máximos de ejecución (por defecto 60, máximo 300).' },
+        },
+        required: ['command'],
       },
     },
   },
@@ -219,6 +235,22 @@ async function executeTool(name, args) {
       }
       return { found, notFound };
     }
+    case 'run_command': {
+      // Shell local para los despliegues. Los errores NO lanzan: se devuelven
+      // como resultado para que el gestor los vea y reaccione (reintentar,
+      // cambiar de enfoque, reportar).
+      const cmd = String(args.command || '');
+      if (!cmd || cmd.length > 4000) throw new Error('Comando inválido (vacío o >4000 chars)');
+      const timeout = Math.min(Math.max(Number(args.timeout) || 60, 5), 300) * 1000;
+      try {
+        const { stdout, stderr } = await run('bash', ['-lc', cmd], { timeout, maxBuffer: 4 * 1024 * 1024 });
+        const out = (stdout + (stderr?.trim() ? `\n[stderr] ${stderr}` : '')).trim();
+        return { exitCode: 0, output: out.length > 4000 ? out.slice(0, 4000) + '…[recortado]' : out };
+      } catch (err) {
+        const out = `${err.stdout || ''}${err.stderr ? `\n[stderr] ${err.stderr}` : ''}`.trim() || err.message;
+        return { exitCode: typeof err.code === 'number' ? err.code : 1, output: out.slice(0, 4000) };
+      }
+    }
     default:
       throw new Error(`Herramienta desconocida: ${name}`);
   }
@@ -248,16 +280,29 @@ async function callDeepseek(messages) {
 // el registro de herramientas ejecutadas y el historial completo para persistirlo.
 // activeSession: sesión que el usuario tiene adjuntada en la web (si pide algo
 // "de la sesión" sin nombrarla, se refiere a esa).
-export async function runManagerChat(userMessages, activeSession = null) {
+export async function runManagerChat(userMessages, activeSession = null, maxIterations = 10) {
   if (!config.deepseekApiKey) throw new Error('Falta DEEPSEEK_API_KEY en .env');
-  const system = activeSession
-    ? SYSTEM_PROMPT +
-      `\n\nContexto actual: el usuario tiene seleccionada y adjuntada la sesión '${activeSession}' en la web. Si pide algo sobre "la sesión", "esta sesión" o similar sin dar nombre, se refiere a '${activeSession}'.`
-    : SYSTEM_PROMPT;
+  let system = SYSTEM_PROMPT;
+  if (activeSession) {
+    system +=
+      `\n\nContexto actual: el usuario tiene seleccionada y adjuntada la sesión '${activeSession}' en la web. Si pide algo sobre "la sesión", "esta sesión" o similar sin dar nombre, se refiere a '${activeSession}'.`;
+  }
+  // Destinos de despliegue SSH configurados (botón ⬆ Subir): el despliegue lo
+  // ejecuta el agente de la sesión por SSH; tú lo orquestas con send_input y
+  // supervisas con read_session_output. No inventes destinos fuera de esta lista.
+  if (config.deployTargets.length) {
+    const list = config.deployTargets
+      .map((t) => `'${t.name}' (ssh -p ${t.port} ${t.user}@${t.host}, ruta base ${t.basePath})`)
+      .join('; ');
+    system +=
+      `\n\nDestinos de despliegue SSH configurados: ${list}. Cuando te pidan subir/desplegar un proyecto, ` +
+      'ordena al agente de la sesión (send_input) que lo haga por SSH a uno de esos destinos ' +
+      '(ruta sugerida: <basePath>/<slug>) y supervisa su salida; no despliegues a ningún otro sitio.';
+  }
   const messages = [{ role: 'system', content: system }, ...userMessages];
   const toolLog = [];
 
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < maxIterations; i++) {
     const data = await callDeepseek(messages);
     const msg = data.choices?.[0]?.message;
     if (!msg) throw new Error('Respuesta vacía de Deepseek');

@@ -3,7 +3,9 @@ import http from 'node:http';
 import os from 'node:os';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { config, publicConfig, sessionEnv, sessionResumeArgs, updateEnv, assertSessionModelUp } from './config.js';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { config, publicConfig, sessionEnv, sessionResumeArgs, updateEnv, assertSessionModelUp, parseDeployTargets } from './config.js';
 import * as screen from './screen.js';
 import { runManagerChat } from './deepseek.js';
 import { setupTerminalWS } from './terminal.js';
@@ -25,6 +27,8 @@ app.use('/vendor/addon-fit', express.static(path.join(config.root, 'node_modules
 const asyncRoute = (fn) => (req, res) =>
   fn(req, res).catch((err) => res.status(400).json({ error: err.message }));
 
+const runFile = promisify(execFile);
+
 app.get('/api/sessions', asyncRoute(async (_req, res) => {
   const activity = getActivity();
   const saved = await registry.getAll();
@@ -32,6 +36,7 @@ app.get('/api/sessions', asyncRoute(async (_req, res) => {
     ...s,
     activity: activity[s.name.slice(screen.PREFIX.length)]?.activity || null,
     contextSavedAt: activity[s.name.slice(screen.PREFIX.length)]?.contextSavedAt || null,
+    lastMsgAt: activity[s.name.slice(screen.PREFIX.length)]?.lastMsgAt || null,
     label: saved[s.name.slice(screen.PREFIX.length)]?.label || null,
   }));
   const aliveNames = new Set(sessions.map((s) => s.name.slice(screen.PREFIX.length)));
@@ -225,6 +230,86 @@ app.post('/api/sessions/save-all', asyncRoute(async (_req, res) => {
   res.json({ saved, trabajando: saved.filter((r) => r.activity === 'trabajando').map((r) => r.label || r.name) });
 }));
 
+// ---------- Despliegue SSH (botón ⬆ Subir) ----------
+// Quién despliega: el AGENTE de la sesión por SSH (como se hizo a mano con
+// kiokao → farnsworth), orquestado por el gestor. Aquí solo se prueba la
+// conexión y se arranca el despliegue con un prompt construido en el servidor
+// (el cliente solo manda el nombre del destino — nunca texto libre al prompt).
+
+// Probar la conexión SSH de un destino (BatchMode = sin preguntar contraseña:
+// verifica que la clave del usuario ya está autorizada en el servidor).
+// Acepta el destino completo (no hace falta guardarlo antes de probarlo);
+// pasa por el mismo saneado de config.js y va a execFile SIN shell.
+app.post('/api/deploy/test', asyncRoute(async (req, res) => {
+  const t = parseDeployTargets(JSON.stringify([req.body || {}]))[0];
+  if (!t) {
+    return res.status(400).json({ error: 'Destino inválido (name, user, host y basePath absoluta son obligatorios)' });
+  }
+  try {
+    await runFile('ssh', [
+      '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5',
+      '-o', 'StrictHostKeyChecking=accept-new',
+      '-p', String(t.port), `${t.user}@${t.host}`, 'true',
+    ]);
+    res.json({ ok: true });
+  } catch (err) {
+    res.json({
+      ok: false,
+      error: String(err.stderr || err.message).slice(0, 300),
+      hint: `ssh-copy-id -p ${t.port} ${t.user}@${t.host}`,
+    });
+  }
+}));
+
+// Arrancar el despliegue de una sesión: el GESTOR lo ejecuta él mismo con
+// run_command (ssh/rsync al destino, systemd endurecido, nginx, SSL con
+// certbot, verificación https) — no delega en el agente de la sesión.
+// El prompt se construye aquí: el cliente solo manda { target, subdomain,
+// domain }. Puede tardar minutos (certbot, npm/pip remotos): se responde
+// cuando el gestor termina (por eso maxIterations=25).
+app.post('/api/sessions/:name/deploy', asyncRoute(async (req, res) => {
+  const short = req.params.name;
+  if (!screen.isValidName(short)) return res.status(400).json({ error: 'Nombre inválido' });
+  const entry = (await registry.getAll())[short] || {};
+  if (!entry.workdir) {
+    return res.status(400).json({ error: 'La sesión no tiene workdir conocido en el registry' });
+  }
+  const t = config.deployTargets.find((x) => x.name === String(req.body?.target || ''));
+  if (!t) {
+    return res.status(400).json({ error: 'Destino de despliegue no encontrado (configúralo en ⚙ Configuración)' });
+  }
+  const subdomain = String(req.body?.subdomain || '').trim().toLowerCase();
+  const domain = String(req.body?.domain || '').trim().toLowerCase();
+  if (!/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(subdomain)) {
+    return res.status(400).json({ error: 'Subdominio inválido (letras minúsculas, números y guiones)' });
+  }
+  if (!/^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?\.[a-z]{2,}$/.test(domain)) {
+    return res.status(400).json({ error: 'Dominio inválido (p. ej. kiokao.com)' });
+  }
+  const fqdn = `${subdomain}.${domain}`;
+  const remoteDir = `${t.basePath.replace(/\/$/, '')}/${fqdn}`;
+  const prompt =
+    `Despliega AHORA el proyecto de la sesión '${short}'` + (entry.label ? ` ("${entry.label}")` : '') +
+    ` al servidor '${t.name}'. Lo ejecutas TÚ con run_command paso a paso (NO uses send_input ni delegues en la sesión). ` +
+    'Datos del despliegue:\n' +
+    `- Workdir local del proyecto: ${entry.workdir}\n` +
+    `- SSH: ssh -p ${t.port} ${t.user}@${t.host} (auth por clave; añade -o BatchMode=yes. En el servidor hay sudo sin contraseña: sudo -n).\n` +
+    `- Ruta remota: ${remoteDir}\n` +
+    `- URL final objetivo: https://${fqdn}\n` +
+    'Pasos obligatorios, verificando la salida de cada comando antes de seguir:\n' +
+    '1. Inspecciona el workdir local (ls, README, package.json/requirements.txt…) para saber qué tipo de proyecto es, qué dependencias tiene y en qué puerto puede correr.\n' +
+    `2. Copia el proyecto al servidor (rsync -avz --exclude .venv --exclude node_modules --exclude .git; crea antes ${remoteDir}). NUNCA subas el .env local ni secretos.\n` +
+    '3. En el servidor: instala las dependencias (npm ci / python venv + pip / lo que toque) con el usuario del destino.\n' +
+    `4. Crea un servicio systemd (sudo -n) llamado '${subdomain}-${domain.split('.')[0]}' que corra el proyecto con el usuario del destino en un puerto local libre, con hardening: NoNewPrivileges=yes, PrivateTmp=yes, ProtectSystem=strict con ReadWritePaths=${remoteDir}, Restart=on-failure. Actívalo (enable --now) y comprueba que está active.\n` +
+    `5. nginx (sudo -n): virtualhost para ${fqdn} con proxy_pass a http://127.0.0.1:<puerto> (websockets si el proyecto los usa).\n` +
+    `6. SSL: sudo -n certbot --nginx -d ${fqdn} (no interactivo: --non-interactive --agree-tos -m admin@${domain} --redirect). Si falla por DNS (el FQDN no resuelve al servidor), dilo claramente y deja el vhost HTTP funcionando.\n` +
+    '7. Permisos y seguridad: propietario correcto, nada world-writable, el servicio sin más privilegios de los necesarios.\n' +
+    `8. Verificación final: curl -sI https://${fqdn} (o http:// si no hubo SSL) debe responder.\n` +
+    'Si un comando falla, lee el error, corrige y reintenta (tienes margen de iteraciones). ' +
+    'Responde con un resumen: URL, servicio systemd, qué quedó configurado y cualquier pendiente (DNS, secretos, etc.).';
+  res.json(await runManagerChat([{ role: 'user', content: prompt }], short, 25));
+}));
+
 // ---------- Informe periódico del gestor ----------
 // Cada config.reportIntervalMin minutos (0 = desactivado) el gestor revisa las
 // sesiones activas y genera un resumen; la web lo recoge vía GET /api/reports
@@ -337,6 +422,20 @@ app.post('/api/config', asyncRoute(async (req, res) => {
     const n = Number(body.reportIntervalMin);
     if (!Number.isFinite(n) || n < 0 || n > 1440) {
       return res.status(400).json({ error: 'Intervalo de informe inválido (0-1440 minutos)' });
+    }
+  }
+  // Destinos de despliegue: debe ser un JSON array y todos los items válidos
+  // (se reutiliza el saneado de config.js; la comparación de longitud detecta
+  // items descartados). Vacío = sin destinos (CLEARABLE).
+  if (typeof body.deployTargets === 'string' && body.deployTargets.trim() !== '') {
+    const parsed = parseDeployTargets(body.deployTargets.trim());
+    let rawLen = -1;
+    try { rawLen = JSON.parse(body.deployTargets.trim()).length; } catch { /* JSON roto */ }
+    if (rawLen === -1 || parsed.length !== rawLen || parsed.length === 0) {
+      return res.status(400).json({
+        error: 'Destinos inválidos: JSON array de {name, user, host, port?, basePath} ' +
+          '(name [\\w-], user/host sin espacios, basePath absoluta)',
+      });
     }
   }
   const changed = updateEnv(body);

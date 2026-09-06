@@ -1,52 +1,28 @@
 # LSD — LLM Screen Dashboard
 
-🌐 **Read this in other languages:** [Español](README.es.md) · [中文](README.zh.md) · [Euskara](README.eu.md) · [Català](README.ca.md) · [Galego](README.gl.md)
+🌐 **Idiomas:** [Español](README.es.md) · [中文](README.zh.md) · [Euskara](README.eu.md) · [Català](README.ca.md) · [Galego](README.gl.md)
 
-LSD is a **local web dashboard** to create, supervise and operate terminal sessions running AI agent CLIs (kimi, claude, codex, aider…). Instead of juggling many terminal windows, LSD centralizes everything in a single web interface: you see the status of each session, chat with a Deepseek-powered manager, and can drop into any terminal interactively from the browser.
+**LSD** es un dashboard web local para crear, supervisar y operar sesiones de terminal con agentes IA (kimi, claude, codex, aider). Las sesiones viven en **GNU Screen**, por lo que sobreviven al cierre del navegador, reinicios del dashboard y apagados del servidor.
 
-> Every session runs inside **GNU Screen**, so it survives browser closures, dashboard restarts and even server reboots. When LSD starts again, it adopts or restores any still-alive sessions.
+Construido con **Node.js 20 + Express**, sin framework de frontend. Incluye un gestor Deepseek para crear sesiones, leer output y enviar comandos por chat.
 
----
+## Qué hace
 
-## What does it do?
+- Crea y monitoriza sesiones de terminal desde una sola pestaña.
+- Gestor por lenguaje natural: "crea una sesión", "qué hace la sesión X", "envía npm test".
+- Terminal interactivo real vía WebSocket (`node-pty` + `xterm.js`).
+- Persistencia: adopta sesiones vivas y reanuda caídas al reiniciar.
+- Historial y conversación desde `wire.jsonl`.
+- Bot de Matrix opcional para hablar desde el móvil.
 
-- **Orchestrate multiple terminal agents** from one web window.
-- **Create sessions** with a name, working directory and your preferred CLI.
-- **Monitor real-time status** of each session: `Working`, `Waiting`, `Archived`.
-- **Deepseek manager**: ask in natural language (“create a session to analyze this repo”, “check what the security session is doing”, “send `npm test` to the demo session”) and the manager uses *function calling* to act.
-- **Interactive browser terminal**: attach to any session with `screen -x` via WebSocket, just like a real terminal.
-- **History & conversation**: inspect terminal scrollback or the full conversation parsed from kimi's `wire.jsonl`.
-- **Automatic persistence**: session registry, screen snapshots and kimi context are saved so work survives crashes.
+## Requisitos
 
----
+- Node.js ≥ 20
+- GNU Screen (Linux/macOS/WSL2; no nativo en Windows)
+- Un CLI de agente instalado: `kimi`, `claude`, `codex`, `aider`…
+- API key de Deepseek
 
-## Why use it?
-
-| Advantage | Why it matters |
-| --- | --- |
-| **You won't lose work** | Sessions run in GNU Screen; close the browser and they keep running. |
-| **Crash recovery** | On restart, LSD adopts live sessions and resumes crashed ones with `kimi -c` / the CLI's continue flag. |
-| **Single control point** | Manage as many agents as you want without switching terminal tabs. |
-| **Manager with memory** | The Deepseek chat knows your sessions, their state and output, and can act for you. |
-| **Folder isolation** | Each session works in its own directory; the manager never accidentally mixes projects. |
-| **Multi-agent** | Supports kimi, claude, codex, aider and any CLI you can launch with `exec`. |
-| **No external CDN** | xterm.js is served from `node_modules`; works offline once installed. |
-| **Local security** | The web UI has no authentication; control exposure with `HOST` (`127.0.0.1` by default) or put it behind an authenticated proxy. |
-
----
-
-## Requirements
-
-- **Node.js ≥ 20**
-- **GNU Screen** (not available on native Windows; use WSL2)
-- At least one installed and authenticated agent CLI: `kimi`, `claude`, `codex`, `aider`…
-- A **Deepseek API key** for the manager
-
----
-
-## Installation
-
-### Ubuntu / Debian (and other Linux distributions)
+## Instalación
 
 ```bash
 git clone <repo-url>
@@ -54,133 +30,67 @@ cd llm-screen-dashboard
 bash install.sh
 ```
 
-`install.sh` installs system dependencies (Node 20, `screen`, build tools for `node-pty`), runs `npm ci`, creates `.env` interactively and optionally creates a **systemd** service for automatic startup.
-
-### macOS
-
-```bash
-git clone <repo-url>
-cd llm-screen-dashboard
-bash install.sh
-```
-
-The script detects macOS, installs dependencies via `brew` if needed, and guides `.env` setup.
-
-### Windows
-
-GNU Screen does not exist natively on Windows, so LSD runs inside **WSL2**:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File install.ps1
-```
-
-`install.ps1` checks for WSL2, installs Ubuntu if missing, and runs `install.sh` inside WSL2. Once running, the web UI is accessible from Windows at `http://localhost:3000`.
-
-> Manual alternative: install WSL2 with Ubuntu, clone the repo inside Ubuntu and follow the Linux steps.
-
----
+`install.sh` instala dependencias, crea `.env` y opcionalmente un servicio systemd.
 
 ## Quick start
-
-If you prefer not to use the automatic installer:
 
 ```bash
 npm install
 cp .env.example .env
-# Edit .env and add your DEEPSEEK_API_KEY
+# Editar .env con DEEPSEEK_API_KEY
 npm start
 ```
 
-Open http://localhost:3000 in your browser.
+Abre http://localhost:3000.
 
-### Important `.env` variables
+## Configuración
+
+Variables clave en `.env`:
 
 ```env
-DEEPSEEK_API_KEY=your-api-key
-DEEPSEEK_MODEL=deepseek-v4-flash   # or deepseek-v4-pro
-SESSION_CLI=kimi                   # default CLI for new sessions
+DEEPSEEK_API_KEY=tu-key
+DEEPSEEK_MODEL=deepseek-v4-flash
+SESSION_CLI=kimi
 PORT=3000
-HOST=127.0.0.1                     # 0.0.0.0 = all interfaces (use only with authenticated proxy)
+HOST=127.0.0.1
 ```
 
----
+## Uso básico
 
-## Basic usage
+1. Crea una sesión con nombre y directorio.
+2. Selecciona la sesión: terminal interactivo a la izquierda.
+3. Chatea con el gestor a la derecha.
+4. Archiva/reabre sesiones.
+5. Descarga historial en Markdown.
 
-1. **Create a session**: enter a name and optionally a working directory. If the folder has content, LSD offers to let the manager analyze it.
-2. **View the terminal**: select the session. The left panel becomes an interactive terminal.
-3. **Ask the manager**: type in the right-side chat. You can ask it to create sessions, read output or send commands.
-4. **Archive / reopen**: when done with a session, archive it to close the screen while keeping context. Reopen it anytime.
-5. **Save history**: download a Markdown file with the full conversation and latest screen snapshot.
+## API REST
 
----
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| GET | `/api/sessions` | Lista sesiones |
+| POST | `/api/sessions` | Crea sesión |
+| GET | `/api/sessions/:name/output` | Últimas líneas |
+| GET | `/api/sessions/:name/conversation` | Conversación completa |
+| POST | `/api/sessions/:name/archive` | Archiva |
+| POST | `/api/sessions/:name/reopen` | Reabre |
+| POST | `/api/chat` | Chat con gestor |
+| GET / POST | `/api/config` | Configuración |
+| WS | `/ws?name=<sesión>` | Terminal interactivo |
 
-## Highlighted technical features
+## Matrix bot (opcional)
 
-- **Real web terminal** with `node-pty` + `xterm.js`, including support for composed keys (accents), fullscreen keyboard lock in Chromium and buttons for reserved keys like `Ctrl+S` or `Ctrl+T`.
-- **Activity monitor** classifies sessions as `Working` / `Waiting` by comparing hardcopies every 3 seconds.
-- **History archiver** copies new messages from kimi's `wire.jsonl` to `data/history/<slug>.jsonl`.
-- **Periodic manager report** configurable via `REPORT_INTERVAL_MIN` summarizing active sessions (also pushed to Matrix if the bot is enabled — see below).
-- **Local Ollama support** as an optional model override for kimi sessions.
-- **Labels with spaces**: human-friendly names in the UI, internal slugs for screen and URLs.
+```env
+MATRIX_HOMESERVER=https://matrix.org
+MATRIX_USER=@tu-bot:matrix.org
+MATRIX_ACCESS_TOKEN=<token>
+MATRIX_ALLOWED_USERS=@tu-usuario:matrix.org
+```
 
----
+## Seguridad
 
-## Matrix bot (optional)
+- Sin autenticación web. Usa `HOST=127.0.0.1` o un proxy con auth.
+- La API key se guarda en `.env` con permisos restringidos.
 
-You can talk to the same Deepseek manager from your phone through [Matrix](https://matrix.org) (Element and other clients). The bot lives in `src/matrix.js`, answers only whitelisted users and needs an **unencrypted** room (no E2EE support).
-
-The recipe below uses **matrix.org**, the free public homeserver — but any Matrix homeserver works, including **your own** (e.g. a self-hosted Synapse): just point `MATRIX_HOMESERVER` at it. With a private server, account registration is usually closed, so create the bot account on the server itself (for Synapse: `register_new_matrix_user -c /etc/matrix-synapse/homeserver.yaml`).
-
-1. **Create an account for the bot** on matrix.org (from Element: log out and register a new account, e.g. `@my-lsd-bot:matrix.org`).
-2. **Get its access token**:
-   ```bash
-   curl -X POST https://matrix.org/_matrix/client/v3/login \
-     -H 'Content-Type: application/json' \
-     -d '{"type":"m.login.password","identifier":{"type":"m.id.user","user":"my-lsd-bot"},"password":"<bot-password>"}'
-   ```
-   (In Element you can also find it under *Settings → Help & About → Access Token*.)
-3. **Configure `.env`** and restart LSD:
-   ```
-   MATRIX_HOMESERVER=https://matrix.org
-   MATRIX_USER=@my-lsd-bot:matrix.org
-   MATRIX_ACCESS_TOKEN=<token from step 2>
-   MATRIX_ALLOWED_USERS=@your-user:matrix.org
-   ```
-   Without these variables the bot simply does not start. The startup log shows `Matrix: bot conectado como …` when it connects.
-4. **Create an unencrypted room** in Element (*advanced settings → disable encryption* when creating it) and invite the bot typing its full MXID (`@my-lsd-bot:matrix.org`) — new accounts don't show up in the user search. The bot auto-joins invitations from whitelisted users only.
-
-Notes:
-
-- `MATRIX_ALLOWED_USERS` is a comma-separated whitelist of MXIDs. The bot **silently ignores everyone else** — keep it tight: the manager can create and kill sessions.
-- Matrix DMs are encrypted by default and the bot cannot read encrypted rooms; use one dedicated unencrypted room. On matrix.org that means message content is visible to the homeserver operator — with your own server it stays in your hands (transport is TLS either way).
-- The periodic manager report (`REPORT_INTERVAL_MIN`) is also pushed to the bot's rooms.
-
----
-
-## REST API (excerpt)
-
-| Method | Route | Description |
-| --- | --- | --- |
-| GET | `/api/sessions` | List active and archived sessions |
-| POST | `/api/sessions` | Create session `{ name, workdir?, cli?, model? }` |
-| GET | `/api/sessions/:name/output` | Latest terminal lines |
-| GET | `/api/sessions/:name/conversation` | Full parsed conversation |
-| POST | `/api/sessions/:name/archive` | Archive the session |
-| POST | `/api/sessions/:name/reopen` | Reopen an archived session |
-| POST | `/api/chat` | Chat with the Deepseek manager |
-| GET / POST | `/api/config` | Read / update configuration |
-| WS | `/ws?name=<session>` | Interactive terminal |
-
----
-
-## Security
-
-- The web UI has **no authentication**. Use `HOST=127.0.0.1` for local-only access, or place LSD behind an authenticated proxy if you expose `0.0.0.0`.
-- The Deepseek API key is stored in `.env` (restricted permissions set by the installer) and is never returned in full by the API (`GET /api/config` only shows `••••1234`).
-
----
-
-## License
+## Licencia
 
 MIT

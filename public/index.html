@@ -6,7 +6,7 @@
   <title>LSD — LLM Screen Dashboard</title>
   <link rel="icon" type="image/svg+xml" href="logo.svg" />
   <link rel="stylesheet" href="/vendor/xterm/css/xterm.css" />
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="style.css?v=20260901" />
 </head>
 <body>
   <header>
@@ -156,6 +156,43 @@
     </div>
   </div>
 
+  <div id="deploy-modal" class="hidden">
+    <div class="dir-dialog analyze-dialog">
+      <h3 data-i18n="deploy.modalTitle">🚀 Subir proyecto</h3>
+      <p id="deploy-text"></p>
+      <label class="deploy-target-row">
+        <span data-i18n="deploy.targetLabel">Destino</span>
+        <select id="deploy-target-select"></select>
+      </label>
+      <div class="deploy-fqdn-row">
+        <label>
+          <span data-i18n="deploy.subdomainLabel">Subdominio</span>
+          <input id="deploy-subdomain" data-i18n-ph="deploy.subdomainPh" placeholder="mi-app" autocomplete="off" />
+        </label>
+        <span class="deploy-dot">.</span>
+        <label>
+          <span data-i18n="deploy.domainLabel">Dominio</span>
+          <input id="deploy-domain" data-i18n-ph="deploy.domainPh" placeholder="kiokao.com" autocomplete="off" />
+        </label>
+      </div>
+      <div class="dir-actions">
+        <button id="deploy-cancel" type="button" class="btn-secondary" data-i18n="confirm.no">Cancelar</button>
+        <button id="deploy-go" type="button" data-i18n="deploy.confirm">Subir</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Progreso/resultado del despliegue: ventana emergente propia, NO el chat -->
+  <div id="deploy-run-modal" class="hidden">
+    <div class="dir-dialog analyze-dialog deploy-run-dialog">
+      <div class="dir-header">
+        <span id="deploy-run-title"></span>
+        <button id="deploy-run-close" type="button">✕</button>
+      </div>
+      <div id="deploy-run-log" class="deploy-run-log"></div>
+    </div>
+  </div>
+
   <div id="archived-modal" class="hidden">
     <div class="dir-dialog archived-dialog">
       <div class="dir-header">
@@ -219,6 +256,23 @@
           </details>
           <div id="cfg-session-warning" class="warning hidden"></div>
         </fieldset>
+        <fieldset>
+          <legend data-i18n="config.legendDeploy">Despliegue SSH — a qué servidores puede subir proyectos el gestor</legend>
+          <div id="deploy-targets"></div>
+          <button id="deploy-add" type="button" class="btn-secondary" data-i18n="deploy.add">＋ Añadir destino</button>
+          <details class="info-help left">
+            <summary data-i18n-title="config.helpTitle" title="Ayuda de configuración">ⓘ</summary>
+            <p class="help" data-i18n-html="deploy.configHelp">
+              Destinos para el botón <strong>⬆ Subir</strong> de cada sesión: el gestor
+              ordena al agente de la sesión que suba el proyecto por SSH
+              (<code>&lt;ruta base&gt;/&lt;nombre sesión&gt;</code>) y se encarga del
+              despliegue completo. La autenticación es por <strong>clave SSH del
+              usuario</strong> (sin contraseña): haz antes
+              <code>ssh-copy-id usuario@servidor</code> y verifícalo con
+              <strong>Probar</strong>. Vacío = botón ⬆ desactivado.
+            </p>
+          </details>
+        </fieldset>
         <datalist id="model-list"></datalist>
         <!-- Planos separados: el gestor ve los modelos de SU API (model-list);
              el override de sesiones solo modelos locales de Ollama -->
@@ -247,7 +301,7 @@
 
   <script src="/vendor/xterm/lib/xterm.js"></script>
   <script src="/vendor/addon-fit/lib/addon-fit.js"></script>
-  <script src="i18n.js"></script>
-  <script src="app.js"></script>
+  <script src="i18n.js?v=20260901e"></script>
+  <script src="app.js?v=20260901e"></script>
 </body>
 </html>

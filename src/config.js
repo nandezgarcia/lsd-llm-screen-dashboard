@@ -22,6 +22,39 @@ function loadEnv() {
 
 loadEnv();
 
+// Parsea y sanea DEPLOY_TARGETS (JSON array). Cualquier item inválido se
+// descarta; JSON roto = [] (con aviso). Los regex importan: estos valores
+// acaban como argumentos de ssh (execFile, sin shell) y en prompts del gestor.
+const TARGET_RE = {
+  name: /^[\w-]{1,40}$/,
+  user: /^[a-z_][a-z0-9_-]{0,31}$/i,
+  host: /^[\w.-]{1,100}$/,
+  basePath: /^\/[\w./-]{0,200}$/,
+};
+export function parseDeployTargets(json) {
+  if (!json) return [];
+  let arr;
+  try {
+    arr = JSON.parse(json);
+  } catch {
+    console.warn('[config] DEPLOY_TARGETS no es JSON válido; ignorado');
+    return [];
+  }
+  if (!Array.isArray(arr)) return [];
+  return arr
+    .filter((t) => t && TARGET_RE.name.test(t.name || '') &&
+      TARGET_RE.user.test(t.user || '') && TARGET_RE.host.test(t.host || '') &&
+      TARGET_RE.basePath.test(t.basePath || '/'))
+    .map((t) => ({
+      name: t.name,
+      user: t.user,
+      host: t.host,
+      port: Number(t.port) > 0 && Number(t.port) < 65536 ? Number(t.port) : 22,
+      basePath: t.basePath || '/',
+    }))
+    .slice(0, 20);
+}
+
 export const config = {
   root: ROOT,
   port: Number(process.env.PORT || 3000),
@@ -44,6 +77,10 @@ export const config = {
     .map((s) => s.trim())
     .filter(Boolean),
   workspacesDir: path.join(ROOT, 'workspaces'),
+  // Destinos de despliegue SSH (botón ⬆ Subir): JSON array en DEPLOY_TARGETS.
+  // Sin secretos aquí: la auth son las claves ~/.ssh del usuario. El despliegue
+  // lo ejecuta el AGENTE de la sesión por SSH, orquestado por el gestor.
+  deployTargets: parseDeployTargets(process.env.DEPLOY_TARGETS),
 };
 
 // Variables que recibe cada sesión kimi dentro de screen.
@@ -202,6 +239,8 @@ export function publicConfig() {
     reportIntervalMin: config.reportIntervalMin,
     // Solo el flag, nunca el token
     matrixEnabled: Boolean(config.matrixHomeserver && config.matrixAccessToken),
+    // Destinos de despliegue SSH (sin secretos: la auth son las ~/.ssh del usuario)
+    deployTargets: config.deployTargets,
     apiKeySet: Boolean(key),
     apiKeyHint: key ? `••••${key.slice(-4)}` : '',
   };
@@ -219,8 +258,9 @@ const EDITABLE = {
   deepseekApiKey: 'DEEPSEEK_API_KEY',
   sessionCli: 'SESSION_CLI',
   reportIntervalMin: 'REPORT_INTERVAL_MIN',
+  deployTargets: 'DEPLOY_TARGETS',
 };
-const CLEARABLE = new Set(['KIMI_SESSION_MODEL', 'KIMI_SESSION_BASE_URL']);
+const CLEARABLE = new Set(['KIMI_SESSION_MODEL', 'KIMI_SESSION_BASE_URL', 'DEPLOY_TARGETS']);
 
 export function updateEnv(updates) {
   const changed = {};
@@ -255,6 +295,9 @@ export function updateEnv(updates) {
   if (changed.SESSION_CLI) config.sessionCli = changed.SESSION_CLI;
   if (changed.REPORT_INTERVAL_MIN !== undefined) {
     config.reportIntervalMin = Number(changed.REPORT_INTERVAL_MIN) || 0;
+  }
+  if (changed.DEPLOY_TARGETS !== undefined) {
+    config.deployTargets = parseDeployTargets(changed.DEPLOY_TARGETS);
   }
   return changed;
 }
