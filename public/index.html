@@ -23,6 +23,7 @@
     </select>
     <button id="goodnight-btn" type="button" data-i18n="header.goodnight" data-i18n-title="header.goodnightTitle" title="Guardar el estado de todas las sesiones para mañana">🌙 Hasta mañana</button>
     <button id="archived-btn" type="button" data-i18n-title="header.archivedTitle" title="Ver sesiones archivadas">🗄 Archivadas</button>
+    <button id="publish-btn" type="button" data-i18n="publish.btn" data-i18n-title="header.publishTitle" title="Publicar la web de una sesión">🌐 Publicar</button>
     <button id="config-btn" type="button" data-i18n-title="header.configTitle" title="Configuración">⚙</button>
   </header>
 
@@ -193,11 +194,19 @@
     </div>
   </div>
 
-  <!-- Publicar: el usuario solo aporta el subdominio; el resto es la config -->
+  <!-- Publicar (botón 🌐 de la cabecera, como 🗄/⚙): elige la sesión
+       publicable y el subdominio; el resto sale de la configuración -->
   <div id="publish-modal" class="hidden">
     <div class="dir-dialog analyze-dialog">
-      <h3 data-i18n="publish.modalTitle">🌐 Publicar web</h3>
+      <div class="dir-header">
+        <span data-i18n="publish.modalTitle">🌐 Publicar web</span>
+        <button id="publish-close" type="button">✕</button>
+      </div>
       <p id="publish-text"></p>
+      <label class="deploy-target-row">
+        <span data-i18n="publish.sessionLabel">Sesión</span>
+        <select id="publish-session"></select>
+      </label>
       <div class="deploy-fqdn-row">
         <label>
           <span data-i18n="publish.subdomainLabel">Subdominio</span>

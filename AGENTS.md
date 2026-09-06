@@ -388,14 +388,16 @@ la línea de comandos del propio shell y se automata). Buscar el PID por puerto:
   directo; cerrado a propósito SOLO si HOST=127.0.0.1 o proxy con auth.
   Ojo: kimi nuevo en una carpeta pide "Trust this folder" y bloquea el
   arranque hasta contestar.
-- **Publicación web (botón 🌐 Publicar, 06/09/26)**: destino ÚNICO fijo
-  (`PUBLISH_DOMAIN`, por defecto `kiokao.com`) pensado para "subir la web" sin
-  pensar: el usuario SOLO aporta el subdominio en el modal (por defecto el
+- **Publicación web (botón 🌐 Publicar, 06/09/26)**: botón EN LA CABECERA
+  (mismo patrón que 🗄 Archivadas y ⚙, con ✕ y clic-fuera; NO es un botón por
+  sesión — se movió a petición del usuario). El modal ofrece un desplegable
+  con las sesiones PUBLICABLES (`publishable` en `GET /api/sessions`: el
+  workdir tiene `index.html` o `package.json`; preselecciona la sesión
+  adjuntada si lo es) y el usuario SOLO aporta el subdominio (por defecto el
   slug); dominio/servidor/usuario/contraseña/ruta/puerto salen de ⚙ →
   "Publicación web" (`PUBLISH_*` en `.env`, hot-apply; `PUBLISH_HOST` vacío =
-  el servidor es el propio dominio, CLEARABLE). El botón 🌐 SOLO aparece en
-  sesiones PUBLICABLES: `GET /api/sessions` marca `publishable` si el workdir
-  tiene `index.html` o `package.json`. **Auth SSH: primero la CLAVE del
+  el servidor es el propio dominio, CLEARABLE; `PUBLISH_DOMAIN` por defecto
+  `kiokao.com`). **Auth SSH: primero la CLAVE del
   usuario** (BatchMode, como ⬆ Subir — el servidor real es farnsworth,
   andres@10.13.0.1, donde la clave ya está autorizada y hay sudo -n); la
   contraseña (`PUBLISH_PASSWORD` → `$PUBLISH_PASSWORD` con `sshpass -e` en
@@ -414,8 +416,9 @@ la línea de comandos del propio shell y se automata). Buscar el PID por puerto:
 
 ## Estado al guardar este archivo
 
-- **Publicación web (06/09/26)**: botón 🌐 Publicar en sesiones publicables
-  (index.html/package.json), destino único `PUBLISH_*` (kiokao.com servido
+- **Publicación web (06/09/26)**: botón 🌐 Publicar EN LA CABECERA (modal con
+  desplegable de sesiones publicables — index.html/package.json — y campo de
+  subdominio), destino único `PUBLISH_*` (kiokao.com servido
   desde farnsworth, andres@10.13.0.1 — ya configurado en `.env`, con
   contraseña de respaldo). Auth: clave SSH primero, sshpass solo si hace
   falta. Ver la decisión "Publicación web". **Verificado E2E**: el gestor

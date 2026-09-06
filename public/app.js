@@ -734,6 +734,7 @@ async function refreshSessions() {
       name: s.name.slice('kimi-'.length),
       label: s.label,
       activity: s.activity,
+      publishable: Boolean(s.publishable),
     }));
     document.getElementById('active-count').textContent = managed.length;
     sessionList.innerHTML = '';
@@ -782,18 +783,6 @@ async function refreshSessions() {
         openDeployModal(short, display);
       };
       li.append(up);
-      // Publicar solo tiene sentido si la carpeta pinta una web (flag del servidor)
-      if (s.publishable) {
-        const pub = document.createElement('button');
-        pub.className = 'up-btn publish-btn';
-        pub.textContent = t('publish.btn');
-        pub.title = t('publish.btnTitle');
-        pub.onclick = (e) => {
-          e.stopPropagation();
-          openPublishModal(short, display);
-        };
-        li.append(pub);
-      }
       const kill = document.createElement('button');
       kill.className = 'kill-btn';
       kill.textContent = '📦';
@@ -1391,42 +1380,60 @@ document.getElementById('deploy-go').onclick = async () => {
   }
 };
 
-// ---------- Publicación web (botón 🌐, destino único de ⚙ Configuración) ----------
-// El usuario SOLO aporta el subdominio; dominio/servidor/usuario/contraseña
-// salen de la configuración (PUBLISH_*). El gestor ejecuta todo con run_command.
+// ---------- Publicación web (botón 🌐 de la cabecera, como 🗄/⚙) ----------
+// El modal ofrece las sesiones PUBLICABLES (flag del servidor: index.html o
+// package.json en el workdir) y el usuario SOLO aporta el subdominio;
+// dominio/servidor/credenciales salen de la configuración (PUBLISH_*).
 
 const publishModal = document.getElementById('publish-modal');
 const publishText = document.getElementById('publish-text');
+const publishSession = document.getElementById('publish-session');
 const publishSubdomain = document.getElementById('publish-subdomain');
 const publishDomainSuffix = document.getElementById('publish-domain-suffix');
-let publishPending = null; // { slug, display } de la sesión a publicar
 
-function openPublishModal(slug, display) {
+function openPublishModal() {
   if (!configCache?.publish?.configured) {
     askConfirm(t('publish.notConfigured'), { title: t('publish.modalTitle'), no: null });
     return;
   }
-  publishPending = { slug, display };
-  publishText.textContent = t('publish.modalText', { name: display, domain: configCache.publish.domain });
-  publishSubdomain.value = slug;
+  const publishable = lastManaged.filter((s) => s.publishable);
+  if (!publishable.length) {
+    askConfirm(t('publish.none'), { title: t('publish.modalTitle'), no: null });
+    return;
+  }
+  publishText.textContent = t('publish.modalText', { domain: configCache.publish.domain });
   publishDomainSuffix.textContent = configCache.publish.domain;
+  publishSession.innerHTML = '';
+  for (const s of publishable) {
+    const opt = document.createElement('option');
+    opt.value = s.name;
+    opt.textContent = s.label || s.name;
+    publishSession.appendChild(opt);
+  }
+  // la sesión adjuntada primero, si es publicable
+  if (selected && publishable.some((s) => s.name === selected)) publishSession.value = selected;
+  publishSubdomain.value = publishSession.value;
   publishModal.classList.remove('hidden');
 }
 
+publishSession.onchange = () => { publishSubdomain.value = publishSession.value; };
+document.getElementById('publish-btn').onclick = openPublishModal;
+document.getElementById('publish-close').onclick = () => publishModal.classList.add('hidden');
 document.getElementById('publish-cancel').onclick = () => publishModal.classList.add('hidden');
 publishModal.onclick = (e) => { if (e.target === publishModal) publishModal.classList.add('hidden'); };
 
 document.getElementById('publish-go').onclick = async () => {
-  const sess = publishPending;
+  const slug = publishSession.value;
+  const display = publishSession.selectedOptions[0]?.textContent || slug;
   const subdomain = publishSubdomain.value.trim().toLowerCase();
-  if (!sess) return;
+  if (!slug) return;
   if (!subdomain) {
     publishText.textContent = t('publish.needSubdomain');
     return;
   }
   publishModal.classList.add('hidden');
   const fqdn = `${subdomain}.${configCache.publish.domain}`;
-  deployRunTitle.textContent = t('publish.runTitle', { name: sess.display, fqdn });
+  deployRunTitle.textContent = t('publish.runTitle', { name: display, fqdn });
   deployRunLog.innerHTML = '';
   deployRunLog.dataset.running = '1';
   const spin = document.createElement('p');
@@ -1435,7 +1442,7 @@ document.getElementById('publish-go').onclick = async () => {
   deployRunLog.appendChild(spin);
   deployRunModal.classList.remove('hidden');
   try {
-    const result = await api(`/api/sessions/${encodeURIComponent(sess.slug)}/publish`, {
+    const result = await api(`/api/sessions/${encodeURIComponent(slug)}/publish`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ subdomain }),
