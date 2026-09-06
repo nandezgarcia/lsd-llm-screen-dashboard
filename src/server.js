@@ -323,19 +323,36 @@ app.post('/api/sessions/:name/deploy', asyncRoute(async (req, res) => {
 }));
 
 // ---------- Publicación web (botón 🌐 Publicar) ----------
-// Destino ÚNICO configurado en ⚙ (PUBLISH_*: dominio kiokao.com por defecto).
-// A diferencia de ⬆ Subir (clave SSH), la auth es por CONTRASEÑA vía sshpass:
-// la contraseña está en el entorno del proceso (PUBLISH_PASSWORD) y los
-// comandos del gestor la usan como $PUBLISH_PASSWORD con `sshpass -e` — nunca
-// se escribe en el prompt, en el toolLog ni sale por la API.
+// Destino ÚNICO configurado en ⚙ (PUBLISH_*: dominio kiokao.com por defecto,
+// servidor farnsworth). Auth: primero la CLAVE SSH del usuario (BatchMode,
+// como ⬆ Subir); la contraseña (sshpass -e con $PUBLISH_PASSWORD del entorno)
+// es solo el fallback — nunca se escribe en el prompt, el toolLog ni sale por
+// la API.
 
-// sshpass es imprescindible para la auth por contraseña; sin él, error accionable
-async function assertSshpass() {
+// Prueba la conexión SSH del destino: clave primero, contraseña después.
+// Devuelve { ok, method: 'key'|'password' } o lanza con mensaje accionable.
+async function tryPublishSsh(p) {
+  const base = ['-o', 'ConnectTimeout=8', '-o', 'StrictHostKeyChecking=accept-new'];
   try {
-    await runFile('bash', ['-lc', 'command -v sshpass']);
-  } catch {
-    throw new Error('Falta sshpass en este equipo (instálalo: sudo apt install sshpass)');
+    await runFile('ssh', [...base, '-o', 'BatchMode=yes', '-p', String(p.port), `${p.user}@${p.host}`, 'true']);
+    return { ok: true, method: 'key' };
+  } catch { /* la clave no vale: se prueba la contraseña */ }
+  if (p.password) {
+    try {
+      await runFile('sshpass', [
+        '-e', 'ssh', ...base, '-o', 'NumberOfPasswordPrompts=1',
+        '-p', String(p.port), `${p.user}@${p.host}`, 'true',
+      ], { env: { ...process.env, SSHPASS: p.password } });
+      return { ok: true, method: 'password' };
+    } catch (err) {
+      const msg = String(err.stderr || err.message).slice(0, 300);
+      if (/not found|ENOENT/i.test(msg)) {
+        throw new Error('La clave SSH no está autorizada y falta sshpass para probar con contraseña (sudo apt install sshpass)');
+      }
+      throw new Error(`Ni la clave SSH ni la contraseña funcionan: ${msg}`);
+    }
   }
+  throw new Error(`La clave SSH no está autorizada en ${p.user}@${p.host} (ssh-copy-id -p ${p.port} ${p.user}@${p.host}) o configura la contraseña`);
 }
 
 // Config efectiva de publicación: la guardada, con overrides puntuales del body
@@ -354,29 +371,23 @@ function publishConfigFrom(body = {}) {
   };
 }
 
-// Probar la conexión SSH por contraseña del destino de publicación
+// Probar la conexión SSH del destino de publicación (clave y/o contraseña)
 app.post('/api/publish/test', asyncRoute(async (req, res) => {
-  await assertSshpass();
   const p = publishConfigFrom(req.body);
-  if (!p.user || !p.password) {
-    return res.status(400).json({ error: 'Publicación no configurada: faltan usuario y/o contraseña (⚙ Configuración → Publicación web)' });
+  if (!p.user) {
+    return res.status(400).json({ error: 'Publicación no configurada: falta el usuario (⚙ Configuración → Publicación web)' });
   }
   try {
-    await runFile('sshpass', [
-      '-e', 'ssh',
-      '-o', 'ConnectTimeout=8', '-o', 'StrictHostKeyChecking=accept-new',
-      '-o', 'NumberOfPasswordPrompts=1',
-      '-p', String(p.port), `${p.user}@${p.host}`, 'true',
-    ], { env: { ...process.env, SSHPASS: p.password } });
-    res.json({ ok: true });
+    res.json(await tryPublishSsh(p));
   } catch (err) {
-    res.json({ ok: false, error: String(err.stderr || err.message).slice(0, 300) });
+    res.json({ ok: false, error: err.message });
   }
 }));
 
 // Publicar la web de una sesión: el GESTOR lo ejecuta todo con run_command
-// (sshpass + rsync + nginx + certbot). El cliente solo manda { subdomain } —
-// dominio, servidor, usuario y contraseña salen de la configuración.
+// (rsync + nginx + certbot; clave SSH, con sshpass solo si hace falta). El
+// cliente solo manda { subdomain } — dominio, servidor y credenciales salen
+// de la configuración.
 app.post('/api/sessions/:name/publish', asyncRoute(async (req, res) => {
   const short = req.params.name;
   if (!screen.isValidName(short)) return res.status(400).json({ error: 'Nombre inválido' });
@@ -385,29 +396,39 @@ app.post('/api/sessions/:name/publish', asyncRoute(async (req, res) => {
     return res.status(400).json({ error: 'La sesión no tiene workdir conocido en el registry' });
   }
   const p = config.publish;
-  if (!p.user || !p.password) {
-    return res.status(400).json({ error: 'Publicación no configurada: faltan usuario y/o contraseña (⚙ Configuración → Publicación web)' });
+  if (!p.user) {
+    return res.status(400).json({ error: 'Publicación no configurada: falta el usuario (⚙ Configuración → Publicación web)' });
   }
-  await assertSshpass();
+  // Preflight: que la conexión funcione ANTES de soltar al gestor
+  try {
+    await tryPublishSsh(p);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
   const subdomain = String(req.body?.subdomain || '').trim().toLowerCase();
   if (!/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(subdomain)) {
     return res.status(400).json({ error: 'Subdominio inválido (letras minúsculas, números y guiones)' });
   }
   const fqdn = `${subdomain}.${p.domain}`;
   const remoteDir = `${p.basePath.replace(/\/$/, '')}/${fqdn}`;
+  const sshBase = `ssh -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new -p ${p.port}`;
+  const authLines = p.password
+    ? `- SSH: primero prueba con clave (${sshBase} -o BatchMode=yes ${p.user}@${p.host}). Si la clave falla, usa la contraseña: está en la variable de entorno $PUBLISH_PASSWORD del entorno de bash (NUNCA la escribas literalmente, ni la muestres ni la subas a ningún sitio) — export SSHPASS="$PUBLISH_PASSWORD" al inicio de cada run_command que la necesite (cada uno es una shell nueva) y usa sshpass -e, p. ej. sshpass -e ${sshBase} ${p.user}@${p.host} '<comando>' o sshpass -e rsync -avz -e "ssh -p ${p.port}" ...\n` +
+      '- sudo en el servidor: primero sudo -n (sin contraseña); si falla, echo "$PUBLISH_PASSWORD" | sudo -S <comando>.\n'
+    : `- SSH: auth por clave del usuario (${sshBase} -o BatchMode=yes ${p.user}@${p.host}; ya verificado que conecta). En el servidor hay sudo sin contraseña: sudo -n.\n`;
   const prompt =
     `Publica AHORA la web del proyecto de la sesión '${short}'` + (entry.label ? ` ("${entry.label}")` : '') +
     ` en https://${fqdn}. Lo ejecutas TÚ con run_command paso a paso (NO uses send_input ni delegues en la sesión). ` +
     'Datos de la publicación:\n' +
     `- Workdir local del proyecto: ${entry.workdir}\n` +
-    `- Servidor: ${p.user}@${p.host} (puerto SSH ${p.port}), auth por CONTRASEÑA: la contraseña está en la variable de entorno $PUBLISH_PASSWORD del entorno de bash. NUNCA la escribas literalmente en un comando, ni la muestres ni la subas a ningún sitio. Cada run_command es una shell nueva: empieza con export SSHPASS="$PUBLISH_PASSWORD" y usa sshpass -e, p. ej. sshpass -e ssh -o StrictHostKeyChecking=accept-new -p ${p.port} ${p.user}@${p.host} '<comando>' o sshpass -e rsync -avz -e "ssh -p ${p.port} -o StrictHostKeyChecking=accept-new" ...\n` +
+    authLines +
     `- Ruta remota: ${remoteDir}\n` +
     `- URL final objetivo: https://${fqdn}\n` +
     'Pasos obligatorios, verificando la salida de cada comando antes de seguir:\n' +
     '1. Inspecciona el workdir local (ls, README, package.json…): si es una web ESTÁTICA (index.html en la raíz) se sube tal cual; si tiene build (npm run build que genera dist/ o build/), constrúyela primero en local y sube el resultado.\n' +
     `2. Sube el contenido con rsync (excluye .git, node_modules, .env y cualquier secreto — NUNCA subas el .env; crea antes ${remoteDir} en el servidor).\n` +
-    `3. nginx: virtualhost para ${fqdn} con root ${remoteDir} (si el proyecto necesita un proceso — puerto, API— en vez de estático, monta el servicio systemd y el proxy_pass como corresponda). Para sudo en el servidor usa la contraseña: echo "$PUBLISH_PASSWORD" | sudo -S <comando>.\n` +
-    `4. SSL: certbot --nginx -d ${fqdn} con --non-interactive --agree-tos -m admin@${p.domain} --redirect (vía sudo -S). Si falla por DNS (el FQDN no resuelve al servidor), dilo claramente y deja el vhost HTTP funcionando.\n` +
+    `3. nginx: virtualhost para ${fqdn} con root ${remoteDir} (si el proyecto necesita un proceso — puerto, API— en vez de estático, monta el servicio systemd y el proxy_pass como corresponda).\n` +
+    `4. SSL: certbot --nginx -d ${fqdn} con --non-interactive --agree-tos -m admin@${p.domain} --redirect. Si falla por DNS (el FQDN no resuelve al servidor), dilo claramente y deja el vhost HTTP funcionando.\n` +
     `5. Permisos y seguridad: propietario correcto, nada world-writable.\n` +
     `6. Verificación final: curl -sI https://${fqdn} (o http:// si no hubo SSL) debe responder.\n` +
     'Si un comando falla, lee el error, corrige y reintenta (tienes margen de iteraciones). ' +

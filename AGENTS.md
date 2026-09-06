@@ -395,13 +395,15 @@ la línea de comandos del propio shell y se automata). Buscar el PID por puerto:
   "Publicación web" (`PUBLISH_*` en `.env`, hot-apply; `PUBLISH_HOST` vacío =
   el servidor es el propio dominio, CLEARABLE). El botón 🌐 SOLO aparece en
   sesiones PUBLICABLES: `GET /api/sessions` marca `publishable` si el workdir
-  tiene `index.html` o `package.json`. A diferencia de ⬆ Subir (clave SSH,
-  varios destinos), la auth es por **CONTRASEÑA vía `sshpass`** (dependencia
-  nueva; install.sh la ofrece): la contraseña vive solo en `.env`/process.env y
-  el gestor la usa como `$PUBLISH_PASSWORD` con `sshpass -e` en `run_command`
-  — NUNCA se escribe en el prompt, el toolLog o la API (`publicConfig` solo
-  expone `passwordSet`/`configured`). En remoto, sudo con
-  `echo "$PUBLISH_PASSWORD" | sudo -S`. Endpoints: `POST /api/publish/test`
+  tiene `index.html` o `package.json`. **Auth SSH: primero la CLAVE del
+  usuario** (BatchMode, como ⬆ Subir — el servidor real es farnsworth,
+  andres@10.13.0.1, donde la clave ya está autorizada y hay sudo -n); la
+  contraseña (`PUBLISH_PASSWORD` → `$PUBLISH_PASSWORD` con `sshpass -e` en
+  run_command, y `sudo -S` en remoto) es SOLO el fallback — NUNCA se escribe
+  en el prompt, el toolLog o la API (`publicConfig` solo expone
+  `passwordSet`/`configured`; `configured` = hay usuario). El endpoint
+  `POST /api/sessions/:name/publish` hace preflight de la conexión
+  (`tryPublishSsh()`: clave, luego contraseña) ANTES de soltar al gestor. Endpoints: `POST /api/publish/test`
   (acepta overrides del formulario para probar ANTES de guardar; la contraseña
   del body solo se usa si viene con valor) y `POST /api/sessions/:name/publish
   {subdomain}` (prompt construido en el servidor, runManagerChat con
@@ -413,10 +415,15 @@ la línea de comandos del propio shell y se automata). Buscar el PID por puerto:
 ## Estado al guardar este archivo
 
 - **Publicación web (06/09/26)**: botón 🌐 Publicar en sesiones publicables
-  (index.html/package.json), destino único `PUBLISH_*` (por defecto
-  kiokao.com), auth por contraseña vía sshpass ($PUBLISH_PASSWORD en el
-  entorno de run_command, nunca en prompts). Ver la decisión "Publicación
-  web". Pendiente de probar E2E contra un servidor real.
+  (index.html/package.json), destino único `PUBLISH_*` (kiokao.com servido
+  desde farnsworth, andres@10.13.0.1 — ya configurado en `.env`, con
+  contraseña de respaldo). Auth: clave SSH primero, sshpass solo si hace
+  falta. Ver la decisión "Publicación web". **Verificado E2E**: el gestor
+  publicó `juego-de-invierno` en https://lsd-test.kiokao.com SOLO con clave
+  (20 run_command: rsync a /var/www/<fqdn>, vhost nginx, certbot con
+  redirect, https 200 verificado desde fuera) y detectó bien que era web
+  estática sin build; limpiado tras la prueba (vhost, cert y carpeta
+  borrados).
 - **Bot de Matrix en producción (02/08/26)**: `@lsd-bot:whasap.duckdns.org`
   activo contra el Synapse de farnsworth; verificado E2E (autojoin selectivo,
   respuesta del gestor con tools, informe periódico a Matrix, usuario no

@@ -56,10 +56,10 @@ export function parseDeployTargets(json) {
 }
 
 // Config de "Publicar" (botón 🌐): UN solo destino fijo (por defecto el hosting
-// de kiokao.com) con auth por CONTRASEÑA (sshpass), a diferencia de ⬆ Subir
-// (DEPLOY_TARGETS, varios destinos con clave SSH). La contraseña vive solo en
-// .env y en process.env: el gestor la usa como $PUBLISH_PASSWORD vía sshpass -e
-// (nunca aparece en prompts ni en la API pública).
+// de kiokao.com en farnsworth), a diferencia de ⬆ Subir (DEPLOY_TARGETS, varios
+// destinos). Auth: PRIMERO la clave SSH del usuario (BatchMode); la CONTRASEÑA
+// (sshpass) es solo el fallback — vive en .env/process.env y el gestor la usa
+// como $PUBLISH_PASSWORD vía sshpass -e (nunca en prompts ni en la API pública).
 const PUBLISH_DOMAIN_RE = /^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?\.[a-z]{2,}$/;
 function publishFromEnv() {
   const domain = PUBLISH_DOMAIN_RE.test(process.env.PUBLISH_DOMAIN || '')
@@ -279,7 +279,9 @@ export function publicConfig() {
       basePath: config.publish.basePath,
       port: config.publish.port,
       passwordSet: Boolean(config.publish.password),
-      configured: Boolean(config.publish.user && config.publish.password),
+      // Configurado = hay usuario; la contraseña es opcional (primero se
+      // intenta la clave SSH del usuario)
+      configured: Boolean(config.publish.user),
     },
     apiKeySet: Boolean(key),
     apiKeyHint: key ? `••••${key.slice(-4)}` : '',

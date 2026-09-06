@@ -299,16 +299,19 @@ export async function runManagerChat(userMessages, activeSession = null, maxIter
       'ordena al agente de la sesión (send_input) que lo haga por SSH a uno de esos destinos ' +
       '(ruta sugerida: <basePath>/<slug>) y supervisa su salida; no despliegues a ningún otro sitio.';
   }
-  // Publicación web configurada (botón 🌐 Publicar): destino único con auth por
-  // contraseña. La contraseña NUNCA se menciona aquí: está en el entorno de
-  // run_command como $PUBLISH_PASSWORD y se usa con `sshpass -e`.
-  if (config.publish?.user && config.publish?.password) {
+  // Publicación web configurada (botón 🌐 Publicar): destino único. Auth SSH:
+  // primero la clave del usuario; la contraseña (si hay) es el fallback y NUNCA
+  // se menciona aquí: está en el entorno de run_command como $PUBLISH_PASSWORD
+  // y se usa con `sshpass -e`.
+  if (config.publish?.user) {
     system +=
       `\n\nPublicación web configurada: puedes publicar webs en subdominios de '${config.publish.domain}' ` +
       `(servidor ${config.publish.user}@${config.publish.host}, puerto ${config.publish.port}, ruta base ${config.publish.basePath}). ` +
-      'La autenticación SSH es por contraseña, disponible en la variable de entorno $PUBLISH_PASSWORD de la shell de run_command ' +
-      '(úsala con sshpass -e; nunca la escribas literalmente ni la muestres). Si te piden "publica esta web en <subdominio>", ' +
-      'ejecuta la publicación tú mismo con run_command (rsync + nginx + certbot en ese servidor).';
+      'Auth SSH: primero prueba con la clave del usuario (-o BatchMode=yes)' +
+      (config.publish.password
+        ? '; si falla, la contraseña está en la variable de entorno $PUBLISH_PASSWORD de la shell de run_command (úsala con sshpass -e; nunca la escribas literalmente ni la muestres)'
+        : '') +
+      '. Si te piden "publica esta web en <subdominio>", ejecuta la publicación tú mismo con run_command (rsync + nginx + certbot en ese servidor).';
   }
   const messages = [{ role: 'system', content: system }, ...userMessages];
   const toolLog = [];
