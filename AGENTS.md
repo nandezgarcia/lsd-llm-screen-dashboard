@@ -391,10 +391,14 @@ la línea de comandos del propio shell y se automata). Buscar el PID por puerto:
 - **Publicación web (botón 🌐 Publicar, 06/09/26)**: botón EN LA CABECERA
   (mismo patrón que 🗄 Archivadas y ⚙, con ✕ y clic-fuera; NO es un botón por
   sesión — se movió a petición del usuario). El modal ofrece un desplegable
-  con las sesiones PUBLICABLES (`publishable` en `GET /api/sessions`: el
-  workdir tiene `index.html` o `package.json`; preselecciona la sesión
-  adjuntada si lo es) y el usuario SOLO aporta el subdominio (por defecto el
-  slug); dominio/servidor/usuario/contraseña/ruta/puerto salen de ⚙ →
+  con TODAS las sesiones activas (el gestor inspecciona la carpeta al publicar;
+  07/09/26 — antes solo las publicables y el usuario no podía elegir otra),
+  con las PUBLICABLES primero y marcadas con 🌐 (`publishable` en
+  `GET /api/sessions`, vía `looksLikeWeb()`: el workdir tiene `index.html` o
+  `package.json` en la raíz O un nivel dentro — `site/`, `frontend/`…;
+  preselecciona la sesión adjuntada) y el usuario SOLO aporta el subdominio
+  (por defecto el slug); dominio/servidor/usuario/contraseña/ruta/puerto salen
+  de ⚙ →
   "Publicación web" (`PUBLISH_*` en `.env`, hot-apply; `PUBLISH_HOST` vacío =
   el servidor es el propio dominio, CLEARABLE; `PUBLISH_DOMAIN` por defecto
   `kiokao.com`). **Auth SSH: primero la CLAVE del

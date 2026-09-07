@@ -1396,22 +1396,24 @@ function openPublishModal() {
     askConfirm(t('publish.notConfigured'), { title: t('publish.modalTitle'), no: null });
     return;
   }
-  const publishable = lastManaged.filter((s) => s.publishable);
-  if (!publishable.length) {
+  // Todas las activas son elegibles (el gestor inspecciona la carpeta al
+  // publicar); las que pintan web (🌐) van primero como sugerencia
+  const sessions = [...lastManaged].sort((a, b) => Number(b.publishable) - Number(a.publishable));
+  if (!sessions.length) {
     askConfirm(t('publish.none'), { title: t('publish.modalTitle'), no: null });
     return;
   }
   publishText.textContent = t('publish.modalText', { domain: configCache.publish.domain });
   publishDomainSuffix.textContent = configCache.publish.domain;
   publishSession.innerHTML = '';
-  for (const s of publishable) {
+  for (const s of sessions) {
     const opt = document.createElement('option');
     opt.value = s.name;
-    opt.textContent = s.label || s.name;
+    opt.textContent = (s.label || s.name) + (s.publishable ? ' 🌐' : '');
     publishSession.appendChild(opt);
   }
-  // la sesión adjuntada primero, si es publicable
-  if (selected && publishable.some((s) => s.name === selected)) publishSession.value = selected;
+  // la sesión adjuntada primero, si está en la lista
+  if (selected && sessions.some((s) => s.name === selected)) publishSession.value = selected;
   publishSubdomain.value = publishSession.value;
   publishModal.classList.remove('hidden');
 }

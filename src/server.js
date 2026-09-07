@@ -29,19 +29,34 @@ const asyncRoute = (fn) => (req, res) =>
 
 const runFile = promisify(execFile);
 
+// Publicable: el workdir pinta una web (estática o con build npm), en la raíz
+// o un nivel dentro (p. ej. site/index.html, frontend/package.json)
+async function looksLikeWeb(dir) {
+  let entries;
+  try {
+    entries = await fs.readdir(dir, { withFileTypes: true });
+  } catch {
+    return false;
+  }
+  const names = new Set(entries.map((e) => e.name));
+  if (names.has('index.html') || names.has('package.json')) return true;
+  for (const e of entries) {
+    if (!e.isDirectory() || e.name.startsWith('.') || e.name === 'node_modules') continue;
+    try {
+      const sub = await fs.readdir(path.join(dir, e.name));
+      if (sub.includes('index.html') || sub.includes('package.json')) return true;
+    } catch { /* subcarpeta ilegible: se ignora */ }
+  }
+  return false;
+}
+
 app.get('/api/sessions', asyncRoute(async (_req, res) => {
   const activity = getActivity();
   const saved = await registry.getAll();
   const sessions = await Promise.all((await screen.listSessions()).map(async (s) => {
     const short = s.name.slice(screen.PREFIX.length);
-    // Publicable: el workdir pinta una web (estática o con build npm)
     const workdir = saved[short]?.workdir;
-    const publishable = workdir
-      ? await Promise.any([
-          fs.access(path.join(workdir, 'index.html')),
-          fs.access(path.join(workdir, 'package.json')),
-        ]).then(() => true, () => false)
-      : false;
+    const publishable = workdir ? await looksLikeWeb(workdir) : false;
     return {
       ...s,
       activity: activity[short]?.activity || null,
