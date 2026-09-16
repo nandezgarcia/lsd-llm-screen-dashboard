@@ -259,6 +259,15 @@ la línea de comandos del propio shell y se automata). Buscar el PID por puerto:
   WS corta una secuencia) a gris oscuro (palette 236) en el flujo entrante. No
   toca fg, ni el vídeo inverso (SGR 7), ni los fondos oscuros. Verificado a nivel
   de buffer xterm (p15→p236) y con captura.
+- **Copiar sin los cortes del TUI (16/09/26)**: el TUI envuelve los párrafos
+  "a mano" (cada fila visual = línea dura con padding), así que copiar un
+  párrafo del LLM lo pegaba con saltos donde la pantalla lo cortó.
+  `cleanCopiedText()` (`app.js`) limpia la selección al copiar (listeners de
+  `copy` en el terminal —captura, antes que el de xterm— y en el overlay de
+  historial): quita el padding derecho y une con la siguiente las líneas
+  "llenas" (≥75% de la más ancha de la selección) que no acaban en puntuación
+  de cierre. El código casi no se ve afectado (sus líneas rara vez llenan el
+  ancho y suelen acabar en ; ) }). Verificado con prosa/código/listas.
 - **Teclas muertas (tildes)**: el frontend compone a nivel **keydown** con
   `preventDefault` en `deadKeyHandler()` (`app.js`, vía `attachCustomKeyEventHandler`),
   ANTES de que xterm.js o el navegador toquen la tecla: el acento queda

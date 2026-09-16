@@ -233,6 +233,50 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
+// ---------- Copiar sin los cortes de línea del TUI ----------
+// El TUI envuelve los párrafos "a mano": cada fila visual es una línea dura
+// con padding de espacios, así que copiar un párrafo del LLM lo pegaba con
+// saltos donde la pantalla lo cortó. Al copiar (terminal en vivo u overlay
+// de historial) se limpia la selección: sin espacios de relleno a la derecha
+// y uniendo con la siguiente las líneas que el TUI cortó por ancho (línea
+// "llena" —≥75% de la más ancha de la selección— que no acaba en puntuación
+// de cierre). El código casi no se ve afectado: sus líneas rara vez llenan
+// el ancho y suelen terminar en ; ) } etc.
+function cleanCopiedText(text) {
+  const lines = text.replace(/\r/g, '').split('\n').map((l) => l.replace(/[ \t]+$/g, ''));
+  if (lines.length < 2) return lines.join('\n');
+  const maxLen = lines.reduce((m, l) => Math.max(m, l.length), 0);
+  let out = lines[0];
+  for (let i = 1; i < lines.length; i++) {
+    const prev = lines[i - 1];
+    const cur = lines[i];
+    const join =
+      prev.trim().length > 0 &&
+      cur.trim().length > 0 &&
+      prev.length >= Math.max(40, maxLen * 0.75) &&
+      !/[.!?:;…»"'()[\]{}`]$/.test(prev.trim());
+    out += join ? ' ' + cur.trim() : '\n' + cur;
+  }
+  return out;
+}
+
+// Captura ANTES del listener propio de xterm (que está en su textarea,
+// fase bubble): preventDefault + stopPropagation = solo escribe el nuestro
+terminalEl.addEventListener('copy', (ev) => {
+  const sel = term?.getSelection();
+  if (!sel) return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  ev.clipboardData.setData('text/plain', cleanCopiedText(sel));
+}, true);
+
+historyOverlay.addEventListener('copy', (ev) => {
+  const sel = window.getSelection().toString();
+  if (!sel) return;
+  ev.preventDefault();
+  ev.clipboardData.setData('text/plain', cleanCopiedText(sel));
+});
+
 function attachTerminal(short, attempt = 0) {
   detachTerminal();
   terminalEl.textContent = '';
