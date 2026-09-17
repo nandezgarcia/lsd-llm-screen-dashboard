@@ -279,6 +279,17 @@ la línea de comandos del propio shell y se automata). Buscar el PID por puerto:
   "llenas" (≥75% de la más ancha de la selección) que no acaban en puntuación
   de cierre. El código casi no se ve afectado (sus líneas rara vez llenan el
   ancho y suelen acabar en ; ) }). Verificado con prosa/código/listas.
+- **Cron interno de kimi-cli (17/09/26)**: kimi tiene tareas programadas
+  propias (tools CronCreate/CronList/CronDelete; NO el cron del sistema):
+  cron de 5 campos en hora local, prompt re-inyectado en la sesión, ligadas a
+  la sesión (sobreviven a `kimi -c`, no pasan a sesiones nuevas), máx. 50,
+  recurrentes mueren a los 7 días (último disparo `stale`), off con
+  `KIMI_DISABLE_CRON=1`. **Dónde se guardan**: como registros `cron.add`
+  (`{task:{cron,prompt,recurring,id,createdAt}}`) y `cron.delete` (`{ids[]}`)
+  en el propio `wire.jsonl` de cada sesión — NO en state.json ni en archivos
+  aparte (verificado creando una de prueba). `scripts/list-crons.mjs` las
+  lista TODAS (home del usuario + `data/kimi-ollama-home`) reproduciendo
+  adds−deletes por sesión, sin despertar a los agentes.
 - **Teclas muertas (tildes)**: el frontend compone a nivel **keydown** con
   `preventDefault` en `deadKeyHandler()` (`app.js`, vía `attachCustomKeyEventHandler`),
   ANTES de que xterm.js o el navegador toquen la tecla: el acento queda
