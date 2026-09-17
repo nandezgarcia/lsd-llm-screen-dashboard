@@ -251,6 +251,17 @@ la línea de comandos del propio shell y se automata). Buscar el PID por puerto:
   ts) comparando los primeros 60 chars normalizados (`userTsLookup()`); si no
   hay archivo (o no casa), el separador sale sin fecha. La vista Conversación
   usa el ts del propio mensaje. Formato compartido en `fmtTurnTs()`.
+  **Línea "✔ terminó de escribir — fecha" (17/09/26)**: marca el FIN de cada
+  respuesta del LLM. Como en la TUI en vivo no se puede inyectar, se hace en
+  tres sitios propios: (1) bajo el terminal en vivo, `#term-finished` (DOM,
+  visible solo cuando la sesión seleccionada está esperando; la hora es
+  `contextSavedAt` = la marca honesta del fin, vía `updateTermFinished()` en
+  `refreshSessions`); (2) vista Terminal del historial: `finishSep()` antes
+  de cada separador de turno, con el ts del último mensaje assistant archivado
+  antes de esa consulta (`finishTsLookup()` — el archivador corre cada tick,
+  así que ese ts ≈ el fin real); (3) vista Conversación: pie `.conv-fin` en el
+  ÚLTIMO mensaje assistant de cada turno (un turno partido entre pasadas del
+  archivador son varios mensajes seguidos; solo el último lleva pie).
 - **Bloques blancos invisibles (burbuja del usuario, vallas de código)**: la TUI de
   kimi pinta esos bloques con bg blanco (SGR 47/107/48;5;7/15/truecolor) y texto con
   el fg POR DEFECTO — blanco en xterm.js → blanco sobre blanco, invisible hasta

@@ -104,7 +104,32 @@ function userTsLookup(messages) {
   return (line) => map.get(normText(line.replace(/^ ◆ {2}/, '')).slice(0, 60)) || null;
 }
 
-function markTurns(text, tsOf = () => null) {
+// lookup texto de burbuja -> cuándo TERMINÓ la respuesta anterior (ts del
+// último mensaje assistant archivado antes de esa consulta; el archivador
+// corre cada tick del monitor, así que ese ts ≈ el fin real de la respuesta)
+function finishTsLookup(messages) {
+  const map = new Map();
+  let lastAssistantTs = null;
+  for (const m of messages || []) {
+    if (m.role === 'assistant') {
+      if (m.ts) lastAssistantTs = m.ts;
+    } else if (m.role === 'user') {
+      const key = normText(m.text).slice(0, 60);
+      if (key && lastAssistantTs) map.set(key, lastAssistantTs);
+      lastAssistantTs = null; // el fin de turno pertenece a la primera consulta que le sigue
+    }
+  }
+  return (line) => map.get(normText(line.replace(/^ ◆ {2}/, '')).slice(0, 60)) || null;
+}
+
+// Línea "✔ terminó de escribir — fecha" al final de cada respuesta (el TUI
+// en vivo no admite inyección: kimi se repinta a sí misma; esto es para las
+// vistas del historial)
+function finishSep(ts) {
+  return '─'.repeat(14) + ' ' + t('history.finished') + ' — ' + fmtTurnTs(ts) + ' ' + '─'.repeat(14);
+}
+
+function markTurns(text, tsOf = () => null, finOf = () => null) {
   if (!text) return text;
   let first = true;
   return text
@@ -115,7 +140,9 @@ function markTurns(text, tsOf = () => null) {
         first = false;
         return line;
       }
-      return `${turnSep(tsOf(line))}\n${line}`;
+      const fin = finOf(line);
+      const finLine = fin ? `${finishSep(fin)}\n` : '';
+      return `${finLine}${turnSep(tsOf(line))}\n${line}`;
     })
     .join('\n');
 }
@@ -128,11 +155,13 @@ function renderTermHistory(text) {
   if (!text) return '';
   const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const sepText = t('history.turnSep');
+  const finText = t('history.finished');
   return text
     .split('\n')
     .map((line) => {
       const e = esc(line);
       if (/^ ◆ {2}\S/.test(line)) return `<span class="hist-user">${e}</span>`;
+      if (line.includes(finText)) return `<span class="hist-sep hist-fin">${e}</span>`;
       if (line.includes(sepText)) return `<span class="hist-sep">${e}</span>`;
       return e;
     })
@@ -151,7 +180,7 @@ async function loadHistory() {
         api(`/api/sessions/${encodeURIComponent(selected)}/history?lines=2000`),
         api(`/api/sessions/${encodeURIComponent(selected)}/conversation`).catch(() => ({ messages: [] })),
       ]);
-      const marked = markTurns(output, userTsLookup(conv.messages));
+      const marked = markTurns(output, userTsLookup(conv.messages), finishTsLookup(conv.messages));
       if (marked) historyContent.innerHTML = renderTermHistory(marked);
       else historyContent.textContent = t('history.empty');
     } catch (err) {
@@ -163,7 +192,7 @@ async function loadHistory() {
       historyContent.innerHTML = '';
       if (!messages.length) historyContent.textContent = t('history.emptyConv');
       let firstUser = true;
-      for (const m of messages) {
+      messages.forEach((m, i) => {
         if (m.role === 'user') {
           // separador de turnos: cada consulta nueva tras la respuesta anterior.
           // Si el mensaje trae ts (historial archivado), se muestra cuándo se hizo
@@ -180,9 +209,18 @@ async function loadHistory() {
         if (m.role === 'assistant') {
           div.classList.add('md');
           div.innerHTML = renderMarkdown(m.text);
+          // Pie "✔ terminó — fecha" en el ÚLTIMO mensaje assistant del turno
+          // (un turno partido entre dos pasadas del archivador son varios
+          // mensajes seguidos; el ts del último ≈ el fin real de la respuesta)
+          if (m.ts && messages[i + 1]?.role !== 'assistant') {
+            const fin = document.createElement('div');
+            fin.className = 'conv-fin';
+            fin.textContent = `${t('history.finished')} — ${fmtTurnTs(m.ts)}`;
+            div.appendChild(fin);
+          }
         } else div.textContent = m.text;
         historyContent.appendChild(div);
-      }
+      });
     } catch (err) {
       historyContent.textContent = t('history.noConv', { error: err.message });
     }
@@ -762,6 +800,21 @@ for (const [headerId, listEl, key] of [
 // Actividad conocida de las sesiones (para el aviso del botón "Hasta mañana")
 let lastManaged = [];
 
+// Línea "✔ terminó de escribir — fecha" bajo el terminal EN VIVO (17/09/26):
+// en la TUI no se puede inyectar nada (kimi se repinta), así que la línea es
+// un elemento DOM. La hora es contextSavedAt (mtime del wire.jsonl al pasar a
+// esperando = la marca honesta de cuándo acabó). Oculta mientras trabaja.
+function updateTermFinished() {
+  const el = document.getElementById('term-finished');
+  const s = lastManaged.find((x) => x.name === selected);
+  if (!s || !s.contextSavedAt || s.activity === 'trabajando') {
+    el.classList.add('hidden');
+    return;
+  }
+  el.textContent = t('terminal.finishedAt', { date: fmtTurnTs(s.contextSavedAt) });
+  el.classList.remove('hidden');
+}
+
 async function refreshSessions() {
   try {
     const { sessions, archived } = await api('/api/sessions');
@@ -778,8 +831,10 @@ async function refreshSessions() {
       name: s.name.slice('kimi-'.length),
       label: s.label,
       activity: s.activity,
+      contextSavedAt: s.contextSavedAt,
       publishable: Boolean(s.publishable),
     }));
+    updateTermFinished();
     document.getElementById('active-count').textContent = managed.length;
     sessionList.innerHTML = '';
     if (selected && !managed.some((s) => s.name === 'kimi-' + selected)) {
