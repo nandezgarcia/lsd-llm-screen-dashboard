@@ -61,18 +61,21 @@ need_sudo() {
   fi
 }
 
-# --- Node.js >= 20 ---------------------------------------------------------
-node_ok() { command -v node >/dev/null 2>&1 && [ "$(node -v | sed 's/^v//; s/\..*//')" -ge 20 ] 2>/dev/null; }
+# --- Node.js >= 22 ---------------------------------------------------------
+# OJO: el CLI de kimi (@moonshot-ai/kimi-code 2.x) requiere Node >= 22.19
+# (usa createZstdDecompress de node:zlib, inexistente en Node 20) — con 20
+# las sesiones arrancan rotas (SyntaxError al lanzar el CLI).
+node_ok() { command -v node >/dev/null 2>&1 && [ "$(node -v | sed 's/^v//; s/\..*//')" -ge 22 ] 2>/dev/null; }
 
 if node_ok; then
   ok "Node.js $(node -v)"
 else
-  warn "Node.js >= 20 no encontrado."
+  warn "Node.js >= 22 no encontrado."
   case "$PKG" in
     apt)
-      if confirm "¿Instalar Node.js 20 desde NodeSource?"; then
+      if confirm "¿Instalar Node.js 22 desde NodeSource?"; then
         need_sudo
-        curl -fsSL https://deb.nodesource.com/setup_20.x | $SUDO -E bash -
+        curl -fsSL https://deb.nodesource.com/setup_22.x | $SUDO -E bash -
         $SUDO apt-get install -y nodejs
       fi ;;
     dnf)

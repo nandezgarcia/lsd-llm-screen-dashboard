@@ -1,6 +1,6 @@
 # LSD (LLM Screen Dashboard) — contexto del proyecto
 
-Web local (Node 20 + Express, sin framework de frontend) para crear y supervisar
+Web local (Node 22 + Express, sin framework de frontend) para crear y supervisar
 sesiones de **GNU Screen** que ejecutan CLIs de agente (**kimi**, claude, codex…),
 orquestadas por un gestor que usa la **API de Deepseek** (function calling). El
 usuario habla con el gestor por chat y, además, puede escribir directamente en la
@@ -450,6 +450,39 @@ la línea de comandos del propio shell y se automata). Buscar el PID por puerto:
   sube tal cual; con build npm = el gestor construye y sube dist/.
 
 ## Estado al guardar este archivo
+
+- **Despliegue Windows/WSL2 de escritorio (06/10/26, DESKTOP-RJMK50G)**: instancia
+  local en WSL2 (Ubuntu-24.04, proyecto en `/home/andres/lsd-llm-screen-dashboard`,
+  copia rsync desde `C:\andres\...` — la copia Linux es la que corre; los cambios
+  hay que replicarlos o reinstalar). Arranque automático: tarea "LSD-AutoStart"
+  (Programador de tareas, al iniciar sesión) → `autostart/lsd-bootstrap.ps1` →
+  `autostart/lsd-setup.sh` (idempotente, como root; log `/var/log/lsd-setup.log`;
+  claves por `deepseek-key.delivery` y `kimi-key.delivery` en `autostart/`,
+  autodestructivos al inyectar). **Ojo: WSL apaga la distro "idle" a los 15 s
+  aunque systemd tenga servicios activos** — en `%UserProfile%\.wslconfig` hacen
+  falta `[wsl2] vmIdleTimeout=-1` Y `[general] instanceIdleTimeout=-1` (la
+  segunda es la que manda; con solo vmIdleTimeout la web cae entre usos).
+  Bootstrap arrancado 06/10/26: servicio `lsd.service` activo, web
+  http://localhost:3000 OK, gestor verificado con chat real.
+- **Node 22 obligatorio (06/10/26)**: el CLI de las sesiones
+  (@moonshot-ai/kimi-code 2.x) requiere Node >= 22.19 (`createZstdDecompress` de
+  `node:zlib`; con Node 20 el CLI muere con SyntaxError y TODAS las sesiones
+  nacen rotas). install.sh y lsd-setup.sh ya piden >= 22.
+- **kimi auth en ese WSL: PENDIENTE (06/10/26)** — en WSL no hay credenciales
+  de kimi (`~/.kimi-code/config.toml` plantilla vacía): una sesión arranca y
+  llega al TUI, pero toda llamada al modelo falla (401 hasta loguear). Vías:
+  (a) dejar la API key de Moonshot en `C:\andres\autostart\kimi-key.delivery`
+  (el setup la inyecta en `[providers.kimi]` con modelo `kimi-for-coding`;
+  probado con clave falsa: el 401 llega, la config es válida), o (b) `kimi`
+  una vez en WSL y `/login` por OAuth. **Primer arranque de cada workdir nuevo:
+  el TUI pide "Trust this folder?" y bloquea hasta Enter** (send_input con
+  `\r` real responde; el trust queda recordado en `~/.kimi-code/workspace-trust`).
+  El usuario de Windows SÍ tiene kimi autenticado en `C:\Users\Usuario\.kimi-code`
+  (perfil aparte, no compartido con WSL).
+- **Modelo del gestor en ese WSL**: `DEEPSEEK_MODEL=deepseek-flash` — su
+  endpoint solo lista `deepseek-flash`/`deepseek-v4-pro` (rechaza
+  `deepseek-chat`... aunque 06/10/26 respondió OK a `deepseek-chat` igualmente;
+  flash es el preferido documentado). Ollama no instalado en esa máquina.
 
 - **Publicación web (06/09/26)**: botón 🌐 Publicar EN LA CABECERA (modal con
   desplegable de sesiones publicables — index.html/package.json — y campo de
